@@ -1,0 +1,12 @@
+# Replace example.com with your real domain (its DNS A record must point at the VPS IP).
+# Caddy then gets + renews a free HTTPS certificate automatically.
+example.com {
+    encode gzip zstd
+    reverse_proxy app:8000
+}
+
+# No domain yet? Comment the block above and use this to serve plain HTTP on the IP:
+# :80 {
+#     encode gzip zstd
+#     reverse_proxy app:8000
+# }

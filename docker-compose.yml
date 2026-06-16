@@ -1,0 +1,34 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      - DATA_DIR=/data
+      - WARM_EXPIRIES=2
+    volumes:
+      # LEFT side = where your option-data folders (2023/, 2024/, …) live on the VPS.
+      # Change it to match where you uploaded them. ':ro' = read-only (the app only reads).
+      - /opt/nifty-data:/data:ro
+    expose:
+      - "8000"
+    # ── HTTP-only quick test (no domain/Caddy)? Comment out `expose` above and the
+    #    whole `caddy` service below, and uncomment this to hit the VPS IP on :8000:
+    # ports:
+    #   - "8000:8000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

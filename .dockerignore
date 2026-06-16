@@ -1,0 +1,19 @@
+# Keep the build context tiny — never send the data or local installs to Docker.
+2023/
+2024/
+2025/
+2026/
+20*/
+*.csv
+nifty.csv
+untitled folder*/
+frontend/node_modules/
+frontend/dist/
+__pycache__/
+*.pyc
+.git/
+.claude/
+.DS_Store
+CLAUDE.md
+caddy_data/
+caddy_config/

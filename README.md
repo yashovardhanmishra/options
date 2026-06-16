@@ -95,6 +95,18 @@ auto-switches the chain to the matching expiry and opens its chart.
 
 ---
 
+## 3. Deploy to a server (one URL for everyone)
+
+For production, FastAPI can serve the built frontend **and** the API from a single process
+(no CORS, one URL). Build the frontend once (`cd frontend && npm run build`) and run
+`uvicorn server:app --host 0.0.0.0 --port 8000` — it auto-serves `frontend/dist` if present.
+
+A ready-to-go **Docker + Caddy (auto-HTTPS)** setup and a full VPS walkthrough are in
+**[DEPLOY.md](DEPLOY.md)** (`Dockerfile`, `docker-compose.yml`, `Caddyfile`). The data stays
+on the server (mounted at run time) and is never baked into the image.
+
+---
+
 ## File map
 
 ```

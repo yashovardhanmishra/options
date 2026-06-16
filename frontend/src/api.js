@@ -1,7 +1,15 @@
 import axios from 'axios'
 
-// Backend base URL. Override at build/run time with VITE_API_BASE if needed.
-const baseURL = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+// Backend base URL.
+//  - dev (`npm run dev`)        -> http://localhost:8000 (separate Vite + uvicorn)
+//  - production build           -> "" (same-origin: FastAPI serves these files + the API)
+//  - split deploy               -> set VITE_API_BASE to the backend's URL to override
+const baseURL =
+  import.meta.env.VITE_API_BASE !== undefined
+    ? import.meta.env.VITE_API_BASE
+    : import.meta.env.PROD
+      ? ''
+      : 'http://localhost:8000'
 
 const api = axios.create({ baseURL, timeout: 60000 })
 

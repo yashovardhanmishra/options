@@ -16,12 +16,14 @@ Run:
 
 import os
 import re
+import threading
 from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 # --------------------------------------------------------------------------- #
 # Config
@@ -29,6 +31,14 @@ from fastapi.middleware.cors import CORSMiddleware
 # The year folders (2023, 2024, ...) live directly inside this project dir, so
 # default DATA_DIR to this file's directory. Override with the DATA_DIR env var.
 DATA_DIR = Path(os.environ.get("DATA_DIR") or Path(__file__).resolve().parent).resolve()
+
+# Static frontend build (served by this same process in production). Override
+# with FRONTEND_DIR; defaults to ./frontend/dist next to this file.
+FRONTEND_DIR = Path(os.environ.get("FRONTEND_DIR") or Path(__file__).resolve().parent / "frontend" / "dist")
+
+# How many of the newest expiries to pre-parse on startup (warms the cache so the
+# first page load is fast). Set WARM_EXPIRIES=0 to disable.
+WARM_EXPIRIES = int(os.environ.get("WARM_EXPIRIES", "2"))
 
 YEAR_RE = re.compile(r"^\d{4}$")
 EXPIRY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -39,12 +49,19 @@ ONE_SEC = pd.Timedelta(seconds=1)
 
 app = FastAPI(title="Nifty Options Chain API")
 
+# CORS: same-origin (frontend served by this process) needs none. For a split
+# deploy, set CORS_ORIGINS to a comma-separated list, or "*" to allow all.
+_cors_env = os.environ.get("CORS_ORIGINS", "").strip()
+if _cors_env == "*":
+    _cors_origins = ["*"]
+elif _cors_env:
+    _cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
+else:
+    _cors_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -276,10 +293,44 @@ def search(q: str = Query(...), limit: int = 40):
     return out[:limit]
 
 
-@app.get("/")
-def root():
+@app.get("/api")
+def api_info():
     return {
         "service": "Nifty Options Chain API",
         "data_dir": str(DATA_DIR),
-        "endpoints": ["/api/expiries", "/api/dates", "/api/chain", "/api/chart", "/api/search"],
+        "endpoints": ["/api/expiries", "/api/dates", "/api/times", "/api/chain", "/api/chart", "/api/search"],
     }
+
+
+# --------------------------------------------------------------------------- #
+# Warm the cache for the newest expiries in the background (non-blocking), so the
+# first page load doesn't pay the cold ~150-CSV parse. Tune with WARM_EXPIRIES.
+# --------------------------------------------------------------------------- #
+def _warm_cache():
+    if WARM_EXPIRIES <= 0:
+        return
+    try:
+        for exp in expiries()[:WARM_EXPIRIES]:
+            try:
+                folder = find_expiry_dir(exp)
+            except Exception:
+                continue
+            for f in folder.glob("*.csv"):
+                if FILE_RE.search(f.name):
+                    try:
+                        read_csv(f)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+
+threading.Thread(target=_warm_cache, daemon=True).start()
+
+
+# --------------------------------------------------------------------------- #
+# Serve the built frontend from this same process (single-URL deploy). Mounted
+# LAST so the /api/* routes above take precedence. Skipped in dev (no dist yet).
+# --------------------------------------------------------------------------- #
+if FRONTEND_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
