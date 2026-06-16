@@ -33,6 +33,8 @@ function expiryLabel(iso) {
 }
 
 const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 })
+// indicator value: 2 decimals, but compact for big ones (OBV, A/D, PVT…)
+const fmtVal = (v) => (Math.abs(v) >= 100000 ? compact.format(v) : v.toFixed(2))
 
 export default function ChartPanel({ selection, onClose }) {
   const wrapRef = useRef(null)
@@ -219,7 +221,16 @@ export default function ChartPanel({ selection, onClose }) {
         setTip(null)
         return
       }
-      setTip({ x: param.point.x, y: param.point.y, c })
+      // pull each indicator's value(s) at the hovered bar from seriesData
+      const inds = []
+      for (const meta of indSeriesRef.current.values()) {
+        const values = meta.plots.map((p) => {
+          const d = param.seriesData.get(p.series)
+          return d && d.value != null ? d.value : null
+        })
+        if (values.some((v) => v != null)) inds.push({ label: meta.label, color: meta.color, values })
+      }
+      setTip({ x: param.point.x, y: param.point.y, c, inds })
     })
 
     chartRef.current = chart
@@ -265,10 +276,10 @@ export default function ChartPanel({ selection, onClose }) {
     if (!chart) return
 
     // tear down previous indicator series
-    for (const arr of indSeriesRef.current.values()) {
-      for (const s of arr) {
+    for (const meta of indSeriesRef.current.values()) {
+      for (const item of meta.plots) {
         try {
-          chart.removeSeries(s)
+          chart.removeSeries(item.series)
         } catch {
           /* chart already disposed */
         }
@@ -307,18 +318,22 @@ export default function ChartPanel({ selection, onClose }) {
                 crosshairMarkerVisible: false,
               })
         s.setData(plot.data)
-        created.push(s)
+        created.push({ series: s, id: plot.id, color: plot.color })
       }
       if (!def.overlay && def.refs && created[0]) {
         for (const r of def.refs) {
           try {
-            created[0].createPriceLine({ price: r.value, color: r.color, lineWidth: 1, lineStyle: 2, axisLabelVisible: false })
+            created[0].series.createPriceLine({ price: r.value, color: r.color, lineWidth: 1, lineStyle: 2, axisLabelVisible: false })
           } catch {
             /* ignore */
           }
         }
       }
-      indSeriesRef.current.set(ind.uid, created)
+      indSeriesRef.current.set(ind.uid, {
+        label: def.label ? def.label(ind.params) : def.name,
+        color: plots[0]?.color || '#94a3b8',
+        plots: created,
+      })
     }
 
     relayout(oscillators.length)
@@ -504,10 +519,13 @@ export default function ChartPanel({ selection, onClose }) {
         {/* Crosshair tooltip */}
         {tip && (
           <div
-            className="pointer-events-none absolute z-20 w-40 rounded-md border border-edge bg-panel2/95 px-2.5 py-2 text-[11px] shadow-xl shadow-black/50 backdrop-blur"
+            className="pointer-events-none absolute z-20 w-56 rounded-md border border-edge bg-panel2/95 px-2.5 py-2 text-[11px] shadow-xl shadow-black/50 backdrop-blur"
             style={{
-              left: Math.min(tip.x + 16, (wrapRef.current?.clientWidth || 0) - 172),
-              top: Math.max(8, Math.min(tip.y + 16, (wrapRef.current?.clientHeight || 0) - 150)),
+              left: Math.min(tip.x + 16, (wrapRef.current?.clientWidth || 0) - 236),
+              top: Math.max(
+                8,
+                Math.min(tip.y + 16, (wrapRef.current?.clientHeight || 0) - (160 + (tip.inds?.length || 0) * 16)),
+              ),
             }}
           >
             <div className="mb-1 flex justify-between text-slate-400">
@@ -525,6 +543,22 @@ export default function ChartPanel({ selection, onClose }) {
             <div className="my-1 border-t border-edge" />
             <Row label="Vol" value={compact.format(tip.c.volume)} />
             <Row label="OI" value={compact.format(tip.c.oi)} cls="text-yellow-400" />
+
+            {tip.inds && tip.inds.length > 0 && (
+              <>
+                <div className="my-1 border-t border-edge" />
+                {tip.inds.map((ind, i) => (
+                  <div key={i} className="flex justify-between gap-3 font-mono tabular-nums">
+                    <span className="truncate" style={{ color: ind.color }}>
+                      {ind.label}
+                    </span>
+                    <span className="shrink-0 text-slate-200">
+                      {ind.values.map((v) => (v == null ? '–' : fmtVal(v))).join('  ')}
+                    </span>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         )}
       </div>
