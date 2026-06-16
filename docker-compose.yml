@@ -11,7 +11,9 @@ services:
       - DATA_DIR=/data
       - DB_PATH=/db/nifty.duckdb
       - WARM_EXPIRIES=2
-      # Backend token verification (Supabase → Settings → API → JWT Secret).
+      # Backend token verification. SUPABASE_URL verifies modern ES256 tokens via
+      # JWKS; SUPABASE_JWT_SECRET handles legacy HS256. Set whichever your project uses.
+      - SUPABASE_URL=${VITE_SUPABASE_URL:-}
       - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET:-}
       - ALLOWED_EMAIL_DOMAINS=${ALLOWED_EMAIL_DOMAINS:-}
     volumes:

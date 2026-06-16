@@ -47,14 +47,34 @@ FRONTEND_DIR = Path(os.environ.get("FRONTEND_DIR") or Path(__file__).resolve().p
 WARM_EXPIRIES = int(os.environ.get("WARM_EXPIRIES", "2"))
 
 # --- Auth (Supabase) ---
-# Set SUPABASE_JWT_SECRET (Supabase → Settings → API → JWT Secret) to require a
-# valid Google sign-in on every /api request. Unset = open (no auth).
+# Require a valid Google sign-in on every /api request when configured. Unset = open.
+#   SUPABASE_URL         -> verify asymmetric (ES256/RS256) tokens via the project's JWKS
+#   SUPABASE_JWT_SECRET  -> verify legacy HS256 tokens with the shared secret
+# Supabase projects may issue either; we pick the method from each token's `alg`.
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "").strip()
-AUTH_ENABLED = bool(SUPABASE_JWT_SECRET and jwt is not None)
+AUTH_ENABLED = bool((SUPABASE_URL or SUPABASE_JWT_SECRET) and jwt is not None)
 # Optional allow-list, e.g. ALLOWED_EMAIL_DOMAINS="gmail.com" (comma-separated).
 ALLOWED_EMAIL_DOMAINS = [
     d.strip().lower() for d in os.environ.get("ALLOWED_EMAIL_DOMAINS", "").split(",") if d.strip()
 ]
+
+_jwks_client = None
+
+
+def _verify_token(token: str) -> dict:
+    """Verify a Supabase access token, picking HS256 vs JWKS by the token's alg."""
+    alg = jwt.get_unverified_header(token).get("alg", "")
+    if alg == "HS256":
+        return jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated")
+    # asymmetric: verify against the project's public JWKS
+    global _jwks_client
+    if _jwks_client is None:
+        from jwt import PyJWKClient
+
+        _jwks_client = PyJWKClient(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json")
+    key = _jwks_client.get_signing_key_from_jwt(token).key
+    return jwt.decode(token, key, algorithms=["ES256", "RS256"], audience="authenticated")
 
 YEAR_RE = re.compile(r"^\d{4}$")
 EXPIRY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -91,9 +111,7 @@ async def _require_auth(request: Request, call_next):
         header = request.headers.get("authorization", "")
         token = header[7:] if header[:7].lower() == "bearer " else ""
         try:
-            payload = jwt.decode(
-                token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated"
-            )
+            payload = _verify_token(token)
         except Exception:
             return JSONResponse({"detail": "Not authenticated"}, status_code=401)
         if ALLOWED_EMAIL_DOMAINS:

@@ -3,4 +3,4 @@ uvicorn[standard]
 pandas
 python-dotenv
 duckdb
-pyjwt
+pyjwt[crypto]
