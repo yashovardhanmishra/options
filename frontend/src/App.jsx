@@ -4,6 +4,8 @@ import { getExpiries, getDates, getTimes, getChain } from './api'
 import OptionChain from './components/OptionChain'
 import ChartPanel from './components/ChartPanel'
 import SearchBar from './components/SearchBar'
+import Login from './components/Login'
+import { authEnabled, supabase, signOut } from './supabase'
 
 const fmtDate = (iso) => {
   try {
@@ -13,7 +15,33 @@ const fmtDate = (iso) => {
   }
 }
 
+// ---- Auth gate: with Supabase configured, require Google sign-in; otherwise
+// render the app directly (local/no-auth mode). ----
 export default function App() {
+  const [session, setSession] = useState(null)
+  const [checking, setChecking] = useState(authEnabled)
+
+  useEffect(() => {
+    if (!authEnabled) return
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session)
+      setChecking(false)
+    })
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
+    return () => sub.subscription.unsubscribe()
+  }, [])
+
+  if (authEnabled) {
+    if (checking) {
+      return <div className="flex h-screen items-center justify-center bg-ink text-slate-500">Loading…</div>
+    }
+    if (!session) return <Login />
+  }
+
+  return <Viewer userEmail={session?.user?.email} />
+}
+
+function Viewer({ userEmail }) {
   const [expiries, setExpiries] = useState([])
   const [expiry, setExpiry] = useState('')
   const [dates, setDates] = useState([])
@@ -135,8 +163,24 @@ export default function App() {
           </button>
         )}
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-3">
           <SearchBar onSelect={handleSearchSelect} />
+          {authEnabled && (
+            <div className="flex items-center gap-2">
+              {userEmail && (
+                <span className="hidden max-w-[12rem] truncate text-xs text-slate-400 sm:inline" title={userEmail}>
+                  {userEmail}
+                </span>
+              )}
+              <button
+                onClick={signOut}
+                title="Sign out"
+                className="rounded-md border border-edge bg-panel2 px-2.5 py-1 text-xs text-slate-300 hover:bg-edge hover:text-white"
+              >
+                Sign out
+              </button>
+            </div>
+          )}
         </div>
       </header>
 

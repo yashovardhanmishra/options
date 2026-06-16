@@ -39,3 +39,8 @@ CLAUDE.md
 *.ipynb
 *equity*.png
 equity_curve*.png
+
+# secrets (never commit)
+.env
+.env.*
+!.env.example

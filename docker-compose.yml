@@ -1,11 +1,19 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        # Supabase keys baked into the frontend (from a .env file next to this one).
+        - VITE_SUPABASE_URL=${VITE_SUPABASE_URL:-}
+        - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY:-}
     restart: unless-stopped
     environment:
       - DATA_DIR=/data
       - DB_PATH=/db/nifty.duckdb
       - WARM_EXPIRIES=2
+      # Backend token verification (Supabase → Settings → API → JWT Secret).
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET:-}
+      - ALLOWED_EMAIL_DOMAINS=${ALLOWED_EMAIL_DOMAINS:-}
     volumes:
       # Raw CSVs — used to BUILD the DuckDB (and as a fallback if no DB yet).
       # LEFT side = where your 2023/…/2026/ folders live on the VPS. ':ro' = read-only.

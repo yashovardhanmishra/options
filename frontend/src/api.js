@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { authEnabled, getAccessToken } from './supabase'
 
 // Backend base URL.
 //  - dev (`npm run dev`)        -> http://localhost:8000 (separate Vite + uvicorn)
@@ -12,6 +13,15 @@ const baseURL =
       : 'http://localhost:8000'
 
 const api = axios.create({ baseURL, timeout: 60000 })
+
+// Attach the Supabase access token so the backend can verify each request.
+if (authEnabled) {
+  api.interceptors.request.use(async (config) => {
+    const token = await getAccessToken()
+    if (token) config.headers.Authorization = `Bearer ${token}`
+    return config
+  })
+}
 
 export const getExpiries = () =>
   api.get('/api/expiries').then((r) => r.data)

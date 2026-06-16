@@ -21,9 +21,15 @@ from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+
+try:
+    import jwt  # PyJWT, for verifying Supabase access tokens
+except Exception:
+    jwt = None
 
 # --------------------------------------------------------------------------- #
 # Config
@@ -39,6 +45,16 @@ FRONTEND_DIR = Path(os.environ.get("FRONTEND_DIR") or Path(__file__).resolve().p
 # How many of the newest expiries to pre-parse on startup (warms the cache so the
 # first page load is fast). Set WARM_EXPIRIES=0 to disable.
 WARM_EXPIRIES = int(os.environ.get("WARM_EXPIRIES", "2"))
+
+# --- Auth (Supabase) ---
+# Set SUPABASE_JWT_SECRET (Supabase → Settings → API → JWT Secret) to require a
+# valid Google sign-in on every /api request. Unset = open (no auth).
+SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "").strip()
+AUTH_ENABLED = bool(SUPABASE_JWT_SECRET and jwt is not None)
+# Optional allow-list, e.g. ALLOWED_EMAIL_DOMAINS="gmail.com" (comma-separated).
+ALLOWED_EMAIL_DOMAINS = [
+    d.strip().lower() for d in os.environ.get("ALLOWED_EMAIL_DOMAINS", "").split(",") if d.strip()
+]
 
 YEAR_RE = re.compile(r"^\d{4}$")
 EXPIRY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -65,6 +81,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _require_auth(request: Request, call_next):
+    """Require a valid Supabase (Google) token on data endpoints when AUTH_ENABLED."""
+    path = request.url.path
+    if AUTH_ENABLED and request.method != "OPTIONS" and path.startswith("/api/"):
+        header = request.headers.get("authorization", "")
+        token = header[7:] if header[:7].lower() == "bearer " else ""
+        try:
+            payload = jwt.decode(
+                token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated"
+            )
+        except Exception:
+            return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+        if ALLOWED_EMAIL_DOMAINS:
+            email = (payload.get("email") or "").lower()
+            if not any(email.endswith("@" + d) for d in ALLOWED_EMAIL_DOMAINS):
+                return JSONResponse({"detail": "Account not allowed"}, status_code=403)
+    return await call_next(request)
+
 
 # --------------------------------------------------------------------------- #
 # Fast path: a prebuilt DuckDB (see ingest.py) answers every query in ~ms. If the

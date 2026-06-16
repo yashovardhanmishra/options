@@ -6,6 +6,11 @@ WORKDIR /web
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
+# Supabase keys are baked into the frontend at build time (empty = no login).
+ARG VITE_SUPABASE_URL=
+ARG VITE_SUPABASE_ANON_KEY=
+ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
+ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
 # Production build -> api.js uses same-origin (FastAPI serves it). No VITE_API_BASE needed.
 RUN npm run build
 
