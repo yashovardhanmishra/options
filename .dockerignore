@@ -6,6 +6,8 @@
 20*/
 *.csv
 nifty.csv
+*.duckdb
+*.duckdb.wal
 untitled folder*/
 frontend/node_modules/
 frontend/dist/

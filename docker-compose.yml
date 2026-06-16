@@ -4,11 +4,16 @@ services:
     restart: unless-stopped
     environment:
       - DATA_DIR=/data
+      - DB_PATH=/db/nifty.duckdb
       - WARM_EXPIRIES=2
     volumes:
-      # LEFT side = where your option-data folders (2023/, 2024/, …) live on the VPS.
-      # Change it to match where you uploaded them. ':ro' = read-only (the app only reads).
+      # Raw CSVs — used to BUILD the DuckDB (and as a fallback if no DB yet).
+      # LEFT side = where your 2023/…/2026/ folders live on the VPS. ':ro' = read-only.
       - /opt/nifty-data:/data:ro
+      # The fast DuckDB lives here. Build it once with:
+      #   docker compose run --rm app python ingest.py
+      # then the app serves every request in ~milliseconds.
+      - /opt/nifty-db:/db
     expose:
       - "8000"
     # ── HTTP-only quick test (no domain/Caddy)? Comment out `expose` above and the

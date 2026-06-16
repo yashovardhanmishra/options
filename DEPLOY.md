@@ -48,12 +48,25 @@ cd options
 - If you uploaded data somewhere other than `/opt/nifty-data`, edit the `volumes:` line in
   **`docker-compose.yml`**.
 
-## 5. Launch
+## 5. Build the fast database (one-time), then launch
+The app is **much** faster when it serves from a prebuilt **DuckDB** instead of parsing
+CSVs per request (every query becomes ~milliseconds — no first-load wait for visitors).
+Build it once from your CSVs (writes `/opt/nifty-db/nifty.duckdb`):
+```bash
+mkdir -p /opt/nifty-db
+docker compose run --rm app python ingest.py     # a few minutes, one time
+```
+Then start everything:
 ```bash
 docker compose up -d --build
 ```
-First build takes a few minutes (it compiles the frontend). Then open **https://your-domain**
-(or `http://YOUR_SERVER_IP` if you used the HTTP-only block).
+First build compiles the frontend (a few minutes). Open **https://your-domain**
+(or `http://YOUR_SERVER_IP` if you used the HTTP-only block). The app auto-detects the
+DuckDB file and uses it — no per-request CSV parsing, so **no waiting for users**.
+
+> The CSVs are only needed to *build* the DB. Once `nifty.duckdb` exists the app reads it
+> exclusively; if it's missing, the app falls back to parsing CSVs (slower). **Rebuild the
+> DB** whenever you add/change data: re-run the `ingest.py` line, then `docker compose restart app`.
 
 That's it — the app is live for everyone.
 
@@ -74,20 +87,19 @@ cd /opt/options && git pull && docker compose up -d --build
 ```
 Your data and HTTPS certs are untouched — only the app rebuilds.
 
-**Add/refresh data:** drop more folders into `/opt/nifty-data/` (same rsync/WinSCP step),
-then `docker compose restart app`.
+**Add/refresh data:** drop more folders into `/opt/nifty-data/`, **rebuild the DB**
+(`docker compose run --rm app python ingest.py`), then `docker compose restart app`.
 
 ---
 
 ## Notes / tuning
-- **First load per expiry** parses ~150 CSVs (slow once, then cached). `WARM_EXPIRIES=2`
-  pre-warms the two newest expiries on startup so the default view is instant; raise it in
-  `docker-compose.yml` to warm more (uses more RAM/startup time).
-- **CORS** isn't needed here (same origin). If you ever host the frontend separately, set
+- **Speed:** with the DuckDB file built, every endpoint is an indexed query (~ms) — chain
+  ≈ 25 ms, full chart history ≈ 10 ms, expiries/dates/times ≈ 1 ms. No cold-parse, no
+  per-user wait. (Without the DB it falls back to CSV parsing, which is the slow path.)
+- **CORS** isn't needed here (same origin). Hosting the frontend separately? Set
   `CORS_ORIGINS` on the app to the frontend's URL (or `*`).
-- **More concurrency:** on a bigger box you can run multiple workers —
-  change the app command to `uvicorn server:app --host 0.0.0.0 --port 8000 --workers 3`
-  (each worker keeps its own cache, so watch RAM).
-- **For serious public scale**, the per-request CSV parsing is the bottleneck. The clean
-  fix is a one-time ingest of the CSVs into **SQLite/DuckDB/Parquet** and querying that
-  instead — a backend change we can do later if traffic warrants it.
+- **More concurrency:** on a bigger box run multiple workers — change the app command to
+  `uvicorn server:app --host 0.0.0.0 --port 8000 --workers 3`. DuckDB is opened read-only
+  and is happy with concurrent readers.
+- **Disk:** the `.duckdb` is roughly the same size as the CSVs. You can delete the CSVs
+  after building the DB if you're tight on space (keep a copy elsewhere to rebuild later).

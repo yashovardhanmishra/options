@@ -66,6 +66,91 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --------------------------------------------------------------------------- #
+# Fast path: a prebuilt DuckDB (see ingest.py) answers every query in ~ms. If the
+# file isn't present we fall back to parsing CSVs on demand (slower, zero setup).
+# --------------------------------------------------------------------------- #
+DB_PATH = os.environ.get("DB_PATH") or str(Path(__file__).resolve().parent / "nifty.duckdb")
+try:
+    import duckdb
+
+    _DB = duckdb.connect(DB_PATH, read_only=True) if Path(DB_PATH).exists() else None
+except Exception:
+    _DB = None
+
+USING_DB = _DB is not None
+
+
+def _q(sql, params=()):
+    # .cursor() = a thread-safe sibling connection (FastAPI runs sync routes in a
+    # threadpool, so each request gets its own).
+    cur = _DB.cursor()
+    try:
+        return cur.execute(sql, list(params)).fetchall()
+    finally:
+        cur.close()
+
+
+def _db_expiries():
+    return [r[0] for r in _q("SELECT DISTINCT expiry FROM dim_instruments ORDER BY expiry DESC")]
+
+
+def _db_dates(expiry):
+    return [r[0] for r in _q("SELECT date FROM dim_dates WHERE expiry = ? ORDER BY date", [expiry])]
+
+
+def _db_times(expiry, date):
+    return [r[0] for r in _q("SELECT hm FROM dim_times WHERE expiry = ? AND date = ? ORDER BY hm", [expiry, date])]
+
+
+def _db_chain(expiry, date, hm):
+    rows = _q(
+        """
+        SELECT strike, type, close, oi, volume FROM (
+          SELECT strike, type, close, oi, volume,
+                 row_number() OVER (PARTITION BY strike, type ORDER BY unix DESC) AS rn
+          FROM bars
+          WHERE expiry = ? AND date = ? AND (? IS NULL OR hm <= ?)
+        ) WHERE rn = 1
+        """,
+        [expiry, date, hm, hm],
+    )
+    strikes: dict[int, dict] = {}
+    for strike, typ, close, oi, vol in rows:
+        entry = strikes.setdefault(int(strike), {"strike": int(strike), "ce": None, "pe": None})
+        entry["ce" if typ == "CE" else "pe"] = {"ltp": float(close), "oi": float(oi), "volume": float(vol)}
+    return [strikes[s] for s in sorted(strikes)]
+
+
+def _db_chart(expiry, strike, side):
+    rows = _q(
+        "SELECT unix, open, high, low, close, volume, oi FROM bars "
+        "WHERE expiry = ? AND strike = ? AND type = ? ORDER BY unix",
+        [expiry, strike, side],
+    )
+    return [
+        {"time": int(r[0]), "open": float(r[1]), "high": float(r[2]), "low": float(r[3]),
+         "close": float(r[4]), "volume": float(r[5]), "oi": float(r[6])}
+        for r in rows
+    ]
+
+
+def _db_search(needle, want_type, limit):
+    if want_type:
+        rows = _q(
+            "SELECT strike, type, expiry FROM dim_instruments WHERE type = ? AND CAST(strike AS VARCHAR) LIKE ?",
+            [want_type, needle + "%"],
+        )
+    else:
+        rows = _q(
+            "SELECT strike, type, expiry FROM dim_instruments WHERE CAST(strike AS VARCHAR) LIKE ?",
+            [needle + "%"],
+        )
+    out = [{"strike": int(s), "type": t, "expiry": e} for s, t, e in rows]
+    out.sort(key=lambda r: r["expiry"], reverse=True)
+    out.sort(key=lambda r: (str(r["strike"]) != needle, abs(r["strike"] - int(needle))))
+    return out[:limit]
+
 
 # --------------------------------------------------------------------------- #
 # Filesystem helpers
@@ -162,6 +247,8 @@ def _instrument_index():
 @app.get("/api/expiries")
 def expiries():
     """All expiry folders across every year dir, sorted descending."""
+    if USING_DB:
+        return _db_expiries()
     found = set()
     for year_dir in _year_dirs():
         for d in year_dir.iterdir():
@@ -173,6 +260,8 @@ def expiries():
 @app.get("/api/dates")
 def dates(expiry: str = Query(...)):
     """Unique trading dates (ISO YYYY-MM-DD) available in an expiry folder, ascending."""
+    if USING_DB:
+        return _db_dates(expiry)
     folder = find_expiry_dir(expiry)
     found = set()
     for f in folder.glob("*.csv"):
@@ -184,6 +273,8 @@ def dates(expiry: str = Query(...)):
 @app.get("/api/times")
 def times(expiry: str = Query(...), date: str = Query(...)):
     """Unique intraday times (HH:MM) traded on `date`, across all strikes, ascending."""
+    if USING_DB:
+        return _db_times(expiry, date)
     folder = find_expiry_dir(expiry)
     found = set()
     for f in folder.glob("*.csv"):
@@ -206,8 +297,10 @@ def chain(
     LTP=Close, OI=Open Interest, Volume=that row's volume. Strikes present on
     only one side get a null on the missing side.
     """
-    folder = find_expiry_dir(expiry)
     hm = _norm_hm(time) if time else None
+    if USING_DB:
+        return _db_chain(expiry, date, hm)
+    folder = find_expiry_dir(expiry)
     strikes: dict[int, dict] = {}
 
     for f in folder.glob("*.csv"):
@@ -242,6 +335,9 @@ def chart(expiry: str = Query(...), strike: int = Query(...), type: str = Query(
     side = type.strip().upper()
     if side not in ("CE", "PE"):
         raise HTTPException(400, "type must be CE or PE")
+
+    if USING_DB:
+        return _db_chart(expiry, strike, side)
 
     folder = find_expiry_dir(expiry)
     matches = list(folder.glob(f"*_{strike}{side}.csv"))
@@ -278,6 +374,9 @@ def search(q: str = Query(...), limit: int = 40):
     needle = m.group(1)
     want_type = m.group(2).upper() if m.group(2) else None
 
+    if USING_DB:
+        return _db_search(needle, want_type, limit)
+
     out = []
     for strike, typ, exp in _instrument_index():
         if want_type and typ != want_type:
@@ -307,8 +406,8 @@ def api_info():
 # first page load doesn't pay the cold ~150-CSV parse. Tune with WARM_EXPIRIES.
 # --------------------------------------------------------------------------- #
 def _warm_cache():
-    if WARM_EXPIRIES <= 0:
-        return
+    if USING_DB or WARM_EXPIRIES <= 0:
+        return  # DuckDB mode is already instant; nothing to warm
     try:
         for exp in expiries()[:WARM_EXPIRIES]:
             try:

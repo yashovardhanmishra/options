@@ -110,15 +110,25 @@ on the server (mounted at run time) and is never baked into the image.
 ## File map
 
 ```
-server.py                    FastAPI backend (all endpoints + CSV parsing/caching)
+server.py                    FastAPI backend (DuckDB fast path, else CSV parsing)
+ingest.py                    one-time: build nifty.duckdb from the CSVs (fast queries)
+Dockerfile, docker-compose.yml, Caddyfile, DEPLOY.md   production deploy
 frontend/
   src/App.jsx                layout, data loading, panel wiring
   src/api.js                 axios client
   src/components/OptionChain.jsx   the chain table + OI bars
-  src/components/ChartPanel.jsx    lightweight-charts candles + OI pane + tooltip
+  src/components/ChartPanel.jsx    lightweight-charts candles + OI + indicators + tooltip
+  src/components/IndicatorMenu.jsx indicator picker
   src/components/SearchBar.jsx     global instrument search
   src/utils/resample.js      timeframe resampling + date-range filtering
+  src/utils/indicators.js    indicator engine + catalog
 ```
+
+## Fast mode (DuckDB)
+On-demand CSV parsing is fine locally but slow for many users. Run **`python ingest.py`**
+once to build `nifty.duckdb`; the server auto-detects it and answers every request from an
+indexed query (~ms) instead of parsing files. Falls back to CSV mode if the DB is absent.
+See [DEPLOY.md](DEPLOY.md).
 
 ## Notes
 - `chain` volume is the **last row's** volume for that day (per spec — the snapshot is the

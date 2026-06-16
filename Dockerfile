@@ -16,11 +16,14 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY server.py ./
+COPY server.py ingest.py ./
 COPY --from=web /web/dist ./frontend/dist
 
-# Data is NOT baked into the image — mount it at /data at run time.
+# Neither the data nor the built DB are baked in — they're mounted at run time.
+#   DB_PATH    -> the prebuilt DuckDB (fast path); if present the app uses it.
+#   DATA_DIR   -> raw CSVs (used to build the DB via ingest.py, or as a fallback).
 ENV DATA_DIR=/data
+ENV DB_PATH=/db/nifty.duckdb
 ENV WARM_EXPIRIES=2
 EXPOSE 8000
 

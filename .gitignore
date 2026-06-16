@@ -7,6 +7,10 @@
 nifty.csv
 *.csv
 
+# ---- Built database (large; build it from the CSVs with ingest.py) ----
+*.duckdb
+*.duckdb.wal
+
 # ---- Python ----
 __pycache__/
 *.pyc
@@ -30,3 +34,8 @@ Thumbs.db
 # ---- Not part of the viewer app (personal / unrelated) ----
 untitled folder*/
 CLAUDE.md
+# personal backtesting scripts / notebooks / equity charts
+*backtest*
+*.ipynb
+*equity*.png
+equity_curve*.png
