@@ -10,6 +10,9 @@ const fmtOi = (n) => (n == null ? '—' : compact.format(n))
 const fmtVol = (n) => (n == null ? '—' : compact.format(n))
 const fmtLtp = (n) => (n == null ? '—' : n.toFixed(2))
 const fmtFull = (n) => (n == null ? '' : indian.format(n))
+const fmtChg = (n) => (n == null ? '—' : (n > 0 ? '+' : '') + compact.format(n))
+const chgCls = (n) =>
+  n == null ? 'text-slate-600' : n > 0 ? 'text-green-400' : n < 0 ? 'text-red-400' : 'text-slate-400'
 
 /** Horizontal OI bar. side='ce' anchors right (grows left), 'pe' anchors left. */
 function OiBar({ value, max, side }) {
@@ -83,7 +86,7 @@ export default function OptionChain({ chain, onSelect, selected, loading }) {
         <thead>
           <tr>
             <th
-              colSpan={4}
+              colSpan={5}
               className="sticky top-0 z-10 bg-panel px-2 py-1 text-center text-[11px] font-bold uppercase tracking-widest text-sky-400"
             >
               Calls
@@ -92,7 +95,7 @@ export default function OptionChain({ chain, onSelect, selected, loading }) {
               Strike
             </th>
             <th
-              colSpan={4}
+              colSpan={5}
               className="sticky top-0 z-10 bg-panel px-2 py-1 text-center text-[11px] font-bold uppercase tracking-widest text-orange-400"
             >
               Puts
@@ -101,11 +104,13 @@ export default function OptionChain({ chain, onSelect, selected, loading }) {
           <tr>
             <Th className="text-center">OI bar</Th>
             <Th>OI</Th>
+            <Th>Chg OI</Th>
             <Th>Vol</Th>
             <Th className="text-sky-300/80">LTP</Th>
             <Th className="text-center">—</Th>
             <Th className="text-left text-orange-300/80">LTP</Th>
             <Th className="text-left">Vol</Th>
+            <Th className="text-left">Chg OI</Th>
             <Th className="text-left">OI</Th>
             <Th className="text-center">OI bar</Th>
           </tr>
@@ -145,6 +150,13 @@ export default function OptionChain({ chain, onSelect, selected, loading }) {
                   {fmtOi(row.ce?.oi)}
                 </td>
                 <td
+                  className={`${ceCell} ${ceSelCls} ${chgCls(row.ce?.chgOi)}`}
+                  onClick={onCe}
+                  title={fmtFull(row.ce?.chgOi)}
+                >
+                  {fmtChg(row.ce?.chgOi)}
+                </td>
+                <td
                   className={`${ceCell} ${ceSelCls} text-slate-400`}
                   onClick={onCe}
                   title={fmtFull(row.ce?.volume)}
@@ -182,6 +194,13 @@ export default function OptionChain({ chain, onSelect, selected, loading }) {
                   title={fmtFull(row.pe?.volume)}
                 >
                   {fmtVol(row.pe?.volume)}
+                </td>
+                <td
+                  className={`${peCell} ${peSelCls} text-left ${chgCls(row.pe?.chgOi)}`}
+                  onClick={onPe}
+                  title={fmtFull(row.pe?.chgOi)}
+                >
+                  {fmtChg(row.pe?.chgOi)}
                 </td>
                 <td
                   className={`${peCell} ${peSelCls} text-left text-slate-300`}

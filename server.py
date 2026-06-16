@@ -159,21 +159,35 @@ def _db_times(expiry, date):
 
 
 def _db_chain(expiry, date, hm):
+    # snapshot at/before the time, plus each strike's last OI on any earlier day
+    # (previous close) so we can show the change in OI (chgOi = oi - prev_oi).
     rows = _q(
         """
-        SELECT strike, type, close, oi, volume FROM (
-          SELECT strike, type, close, oi, volume,
-                 row_number() OVER (PARTITION BY strike, type ORDER BY unix DESC) AS rn
-          FROM bars
-          WHERE expiry = ? AND date = ? AND (? IS NULL OR hm <= ?)
-        ) WHERE rn = 1
+        SELECT s.strike, s.type, s.close, s.oi, s.volume, p.prev_oi FROM (
+          SELECT strike, type, close, oi, volume FROM (
+            SELECT strike, type, close, oi, volume,
+                   row_number() OVER (PARTITION BY strike, type ORDER BY unix DESC) AS rn
+            FROM bars
+            WHERE expiry = ? AND date = ? AND (? IS NULL OR hm <= ?)
+          ) WHERE rn = 1
+        ) s
+        LEFT JOIN (
+          SELECT strike, type, oi AS prev_oi FROM (
+            SELECT strike, type, oi,
+                   row_number() OVER (PARTITION BY strike, type ORDER BY unix DESC) AS rn
+            FROM bars WHERE expiry = ? AND date < ?
+          ) WHERE rn = 1
+        ) p ON s.strike = p.strike AND s.type = p.type
         """,
-        [expiry, date, hm, hm],
+        [expiry, date, hm, hm, expiry, date],
     )
     strikes: dict[int, dict] = {}
-    for strike, typ, close, oi, vol in rows:
+    for strike, typ, close, oi, vol, prev_oi in rows:
+        chg = float(oi) - float(prev_oi) if prev_oi is not None else None
         entry = strikes.setdefault(int(strike), {"strike": int(strike), "ce": None, "pe": None})
-        entry["ce" if typ == "CE" else "pe"] = {"ltp": float(close), "oi": float(oi), "volume": float(vol)}
+        entry["ce" if typ == "CE" else "pe"] = {
+            "ltp": float(close), "oi": float(oi), "volume": float(vol), "chgOi": chg,
+        }
     return [strikes[s] for s in sorted(strikes)]
 
 
@@ -372,10 +386,15 @@ def chain(
         snap = None
         if not day.empty:
             row = day.iloc[-1]
+            oi = float(row["Open Interest"])
+            # previous close OI = this strike's last OI on any earlier day
+            prev = df[df["__date"] < date]
+            prev_oi = float(prev.iloc[-1]["Open Interest"]) if not prev.empty else None
             snap = {
                 "ltp": float(row["Close"]),
-                "oi": float(row["Open Interest"]),
+                "oi": oi,
                 "volume": float(row["Volume"]),
+                "chgOi": (oi - prev_oi) if prev_oi is not None else None,
             }
 
         entry = strikes.setdefault(strike, {"strike": strike, "ce": None, "pe": None})
