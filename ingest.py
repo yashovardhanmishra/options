@@ -52,6 +52,7 @@ SELECT * FROM (
 )
 -- drop any file whose name isn't <expiry>_<strike><CE|PE>.csv
 WHERE strike IS NOT NULL AND type IN ('CE', 'PE') AND expiry <> ''
+ORDER BY expiry
 """
 
 
@@ -62,15 +63,22 @@ def main():
     t0 = time.time()
 
     con = duckdb.connect(DB_PATH)
+    # Memory-safe build on small boxes: let big operations spill to disk, and cap
+    # the working set (tunable via DUCKDB_MEMORY_LIMIT, e.g. "6GB").
+    tmp = Path(DB_PATH).resolve().parent / ".duckdb_tmp"
+    tmp.mkdir(exist_ok=True)
+    con.execute(f"SET temp_directory = '{tmp}'")
+    con.execute(f"SET memory_limit = '{os.environ.get('DUCKDB_MEMORY_LIMIT', '6GB')}'")
+
+    # bars is written clustered by expiry (see ORDER BY in BUILD_SQL), so queries
+    # that filter by expiry prune via DuckDB's min/max zonemaps — fast, and with no
+    # heavy in-memory ART indexes to build (those blow up RAM on ~175M rows).
     con.execute(BUILD_SQL.replace("__GLOB__", GLOB.replace("'", "''")))
 
     # Tiny dimension tables make expiries/dates/times/search instant (no bars scan).
     con.execute("CREATE OR REPLACE TABLE dim_instruments AS SELECT DISTINCT expiry, strike, type FROM bars")
     con.execute("CREATE OR REPLACE TABLE dim_dates AS SELECT DISTINCT expiry, date FROM bars")
     con.execute("CREATE OR REPLACE TABLE dim_times AS SELECT DISTINCT expiry, date, hm FROM bars")
-
-    con.execute("CREATE INDEX IF NOT EXISTS idx_main  ON bars(expiry, strike, type, unix)")
-    con.execute("CREATE INDEX IF NOT EXISTS idx_chain ON bars(expiry, date)")
 
     rows = con.execute("SELECT count(*) FROM bars").fetchone()[0]
     exps = con.execute("SELECT count(*) FROM (SELECT DISTINCT expiry FROM dim_instruments)").fetchone()[0]
