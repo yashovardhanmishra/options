@@ -1,0 +1,32 @@
+# ---- Options data (NOT in the repo — bring your own; see README) ----
+/2023/
+/2024/
+/2025/
+/2026/
+/20*/
+nifty.csv
+*.csv
+
+# ---- Python ----
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# ---- Node / Vite (frontend) ----
+node_modules/
+dist/
+.vite/
+*.local
+
+# ---- OS / editor / tooling ----
+.DS_Store
+Thumbs.db
+.claude/
+.idea/
+.vscode/
+
+# ---- Not part of the viewer app (personal / unrelated) ----
+untitled folder*/
+CLAUDE.md

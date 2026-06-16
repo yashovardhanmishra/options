@@ -1,0 +1,542 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createChart, CrosshairMode } from 'lightweight-charts'
+import { format, parse } from 'date-fns'
+import { getChart } from '../api'
+import {
+  resample,
+  filterByRange,
+  dateStrToSec,
+  secToDateStr,
+  TIMEFRAMES,
+} from '../utils/resample'
+import { INDICATORS, defaultParams } from '../utils/indicators'
+import IndicatorMenu from './IndicatorMenu'
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const pad = (n) => String(n).padStart(2, '0')
+// Format unix-seconds (wall-clock-as-UTC) using UTC parts -> shows IST clock.
+const fmtDateUTC = (sec) => {
+  const x = new Date(sec * 1000)
+  return `${pad(x.getUTCDate())} ${MONTHS[x.getUTCMonth()]} ${x.getUTCFullYear()}`
+}
+const fmtTimeUTC = (sec) => {
+  const x = new Date(sec * 1000)
+  return `${pad(x.getUTCHours())}:${pad(x.getUTCMinutes())}`
+}
+
+function expiryLabel(iso) {
+  try {
+    return format(parse(iso, 'yyyy-MM-dd', new Date()), 'MMM dd yyyy')
+  } catch {
+    return iso
+  }
+}
+
+const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 })
+
+export default function ChartPanel({ selection, onClose }) {
+  const wrapRef = useRef(null)
+  const chartRef = useRef(null)
+  const candleRef = useRef(null)
+  const oiRef = useRef(null)
+  const mapRef = useRef(new Map()) // time -> full candle (for tooltip)
+  const seriesRef = useRef([]) // latest computed series (read by paint())
+  const indSeriesRef = useRef(new Map()) // indicator uid -> [lightweight-charts series]
+  const uidRef = useRef(0)
+
+  const [raw, setRaw] = useState([])
+  const [tf, setTf] = useState('5m')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [tip, setTip] = useState(null)
+  const [indicators, setIndicators] = useState([]) // [{ uid, key, params }]
+  const [editing, setEditing] = useState(null) // uid whose params are being edited
+
+  const addIndicator = (key) =>
+    setIndicators((list) => [...list, { uid: ++uidRef.current, key, params: defaultParams(key) }])
+  const removeIndicator = (uid) => {
+    setIndicators((list) => list.filter((x) => x.uid !== uid))
+    setEditing((e) => (e === uid ? null : e))
+  }
+  const updateParams = (uid, patch) =>
+    setIndicators((list) =>
+      list.map((x) => (x.uid === uid ? { ...x, params: { ...x.params, ...patch } } : x)),
+    )
+
+  // Stack the candle pane (top) above the OI pane and any oscillator panes.
+  const relayout = (oscCount) => {
+    const chart = chartRef.current
+    if (!chart || !candleRef.current) return
+    const n = oscCount + 1 // oscillators + the OI pane
+    const paneH = Math.min(0.2, 0.62 / n)
+    const bottomTotal = n * paneH
+    const startY = 1 - bottomTotal
+    candleRef.current.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: bottomTotal + 0.04 } })
+    for (let i = 0; i < oscCount; i++) {
+      chart.priceScale(`osc${i}`).applyOptions({
+        scaleMargins: { top: startY + i * paneH, bottom: 1 - (startY + (i + 1) * paneH) },
+      })
+    }
+    chart.priceScale('oi').applyOptions({ scaleMargins: { top: startY + oscCount * paneH, bottom: 0 } })
+  }
+
+  // ----- load full history for the selected instrument -----
+  useEffect(() => {
+    if (!selection) return
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    getChart(selection.expiry, selection.strike, selection.type)
+      .then((data) => {
+        if (cancelled) return
+        setRaw(data)
+        setFrom('')
+        setTo('')
+      })
+      .catch((e) => {
+        if (cancelled) return
+        setRaw([])
+        setError(e?.response?.data?.detail || 'Failed to load chart data.')
+      })
+      .finally(() => !cancelled && setLoading(false))
+    return () => {
+      cancelled = true
+    }
+  }, [selection])
+
+  // data span (for date-picker bounds)
+  const span = useMemo(() => {
+    if (raw.length === 0) return null
+    return { min: raw[0].time, max: raw[raw.length - 1].time }
+  }, [raw])
+
+  // ----- filtered + resampled series -----
+  const series = useMemo(() => {
+    const fromSec = dateStrToSec(from)
+    const toSec = dateStrToSec(to, true)
+    const windowed = filterByRange(raw, fromSec, toSec)
+    return resample(windowed, tf)
+  }, [raw, tf, from, to])
+  seriesRef.current = series
+
+  // Push the current series into the (already created) chart series.
+  const paint = () => {
+    if (!candleRef.current || !oiRef.current) return
+    const s = seriesRef.current
+    const map = new Map()
+    const candles = []
+    const ois = []
+    for (const c of s) {
+      candles.push({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })
+      ois.push({ time: c.time, value: c.oi })
+      map.set(c.time, c)
+    }
+    candleRef.current.setData(candles)
+    oiRef.current.setData(ois)
+    mapRef.current = map
+  }
+
+  // ----- create chart once (container is always mounted) -----
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+
+    const chart = createChart(el, {
+      autoSize: false,
+      width: el.clientWidth,
+      height: el.clientHeight,
+      layout: {
+        background: { color: '#0a0e14' },
+        textColor: '#8b9bb0',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontSize: 11,
+      },
+      grid: {
+        vertLines: { color: 'rgba(40,54,74,0.35)' },
+        horzLines: { color: 'rgba(40,54,74,0.35)' },
+      },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: { color: '#3b4d66', width: 1, style: 2, labelBackgroundColor: '#1e2a3a' },
+        horzLine: { color: '#3b4d66', width: 1, style: 2, labelBackgroundColor: '#1e2a3a' },
+      },
+      rightPriceScale: { borderColor: '#1e2a3a' },
+      timeScale: {
+        borderColor: '#1e2a3a',
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 4,
+        // tickMarkType: 0=Year 1=Month 2=DayOfMonth 3=Time 4=TimeWithSeconds.
+        // Show a date at day/month/year boundaries, else the intraday HH:MM.
+        tickMarkFormatter: (time, tickMarkType) => {
+          const d = new Date(time * 1000)
+          if (tickMarkType === 0) return String(d.getUTCFullYear())
+          if (tickMarkType <= 2) return `${pad(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]}`
+          return fmtTimeUTC(time)
+        },
+      },
+      localization: {
+        timeFormatter: (time) => `${fmtDateUTC(time)}  ${fmtTimeUTC(time)}`,
+      },
+    })
+
+    const candle = chart.addCandlestickSeries({
+      upColor: '#16a34a',
+      downColor: '#dc2626',
+      borderUpColor: '#16a34a',
+      borderDownColor: '#dc2626',
+      wickUpColor: '#16a34a',
+      wickDownColor: '#dc2626',
+      priceLineVisible: false,
+      lastValueVisible: true,
+    })
+    const oi = chart.addLineSeries({
+      priceScaleId: 'oi',
+      color: '#eab308',
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: true,
+    })
+    chart.priceScale('oi').applyOptions({ borderColor: '#1e2a3a' })
+
+    chart.subscribeCrosshairMove((param) => {
+      if (
+        !param.time ||
+        !param.point ||
+        param.point.x < 0 ||
+        param.point.y < 0 ||
+        param.point.x > el.clientWidth ||
+        param.point.y > el.clientHeight
+      ) {
+        setTip(null)
+        return
+      }
+      const c = mapRef.current.get(param.time)
+      if (!c) {
+        setTip(null)
+        return
+      }
+      setTip({ x: param.point.x, y: param.point.y, c })
+    })
+
+    chartRef.current = chart
+    candleRef.current = candle
+    oiRef.current = oi
+    relayout(0)
+
+    // Paint whatever data already exists (handles StrictMode re-mount, where the
+    // [series] effect won't re-fire because `series` is unchanged).
+    paint()
+    if (seriesRef.current.length) chart.timeScale().fitContent()
+
+    const ro = new ResizeObserver(() => {
+      chart.applyOptions({ width: el.clientWidth, height: el.clientHeight })
+    })
+    ro.observe(el)
+
+    return () => {
+      ro.disconnect()
+      chart.remove()
+      chartRef.current = null
+      candleRef.current = null
+      oiRef.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ----- repaint + fit whenever the computed series changes -----
+  // (series only changes on instrument load / timeframe / date-range — all cases
+  // where re-fitting is wanted. Manual pan/zoom doesn't change it, so zoom sticks.)
+  useEffect(() => {
+    paint()
+    setTip(null)
+    if (chartRef.current && series.length) {
+      chartRef.current.timeScale().fitContent()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [series])
+
+  // ----- (re)build indicator series whenever indicators or the candle data change -----
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+
+    // tear down previous indicator series
+    for (const arr of indSeriesRef.current.values()) {
+      for (const s of arr) {
+        try {
+          chart.removeSeries(s)
+        } catch {
+          /* chart already disposed */
+        }
+      }
+    }
+    indSeriesRef.current.clear()
+
+    const candles = seriesRef.current
+    const oscillators = indicators.filter((ind) => INDICATORS[ind.key] && !INDICATORS[ind.key].overlay)
+    const oscScale = new Map()
+    oscillators.forEach((ind, i) => oscScale.set(ind.uid, `osc${i}`))
+
+    for (const ind of indicators) {
+      const def = INDICATORS[ind.key]
+      if (!def || def.disabled) continue
+      let plots = []
+      try {
+        plots = def.compute(candles, ind.params)
+      } catch {
+        plots = []
+      }
+      const scaleId = def.overlay ? 'right' : oscScale.get(ind.uid)
+      const created = []
+      for (const plot of plots) {
+        const s =
+          plot.kind === 'histogram'
+            ? chart.addHistogramSeries({ priceScaleId: scaleId, priceLineVisible: false, lastValueVisible: false })
+            : chart.addLineSeries({
+                priceScaleId: scaleId,
+                color: plot.color,
+                lineWidth: plot.lineWidth ?? 2,
+                lineStyle: plot.lineStyle ?? 0,
+                lineType: plot.stepped ? 1 : 0,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: false,
+              })
+        s.setData(plot.data)
+        created.push(s)
+      }
+      if (!def.overlay && def.refs && created[0]) {
+        for (const r of def.refs) {
+          try {
+            created[0].createPriceLine({ price: r.value, color: r.color, lineWidth: 1, lineStyle: 2, axisLabelVisible: false })
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      indSeriesRef.current.set(ind.uid, created)
+    }
+
+    relayout(oscillators.length)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [series, indicators])
+
+  const hasSelection = !!selection
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Header bar */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-edge bg-panel px-4 py-2">
+        <div className="text-sm font-semibold text-slate-100">
+          {hasSelection ? (
+            <>
+              <span className="text-base">{selection.strike}</span>{' '}
+              <span className={selection.type === 'CE' ? 'text-sky-400' : 'text-orange-400'}>
+                {selection.type}
+              </span>
+              <span className="ml-2 text-xs font-normal text-slate-500">
+                Expiry: {expiryLabel(selection.expiry)}
+              </span>
+            </>
+          ) : (
+            <span className="text-slate-500">Select a strike to load its chart</span>
+          )}
+        </div>
+
+        {hasSelection && (
+          <>
+            {/* Timeframe toggle */}
+            <div className="flex overflow-hidden rounded-md border border-edge">
+              {TIMEFRAMES.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTf(t)}
+                  className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                    tf === t
+                      ? 'bg-sky-600 text-white'
+                      : 'bg-panel2 text-slate-400 hover:bg-edge hover:text-slate-200'
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+
+            <IndicatorMenu onAdd={addIndicator} />
+
+            {/* Date range */}
+            <div className="flex items-center gap-1.5 text-xs text-slate-400">
+              <span>From</span>
+              <input
+                type="date"
+                value={from}
+                min={span ? secToDateStr(span.min) : undefined}
+                max={to || (span ? secToDateStr(span.max) : undefined)}
+                onChange={(e) => setFrom(e.target.value)}
+                className="rounded border border-edge bg-panel2 px-2 py-1 text-slate-200 outline-none focus:border-sky-600"
+              />
+              <span>To</span>
+              <input
+                type="date"
+                value={to}
+                min={from || (span ? secToDateStr(span.min) : undefined)}
+                max={span ? secToDateStr(span.max) : undefined}
+                onChange={(e) => setTo(e.target.value)}
+                className="rounded border border-edge bg-panel2 px-2 py-1 text-slate-200 outline-none focus:border-sky-600"
+              />
+            </div>
+
+            <button
+              onClick={() => {
+                setFrom('')
+                setTo('')
+              }}
+              className="rounded-md border border-edge bg-panel2 px-3 py-1 text-xs text-slate-300 hover:bg-edge hover:text-white"
+            >
+              Reset
+            </button>
+
+            <div className="ml-auto flex items-center gap-3">
+              <span className="text-xs text-slate-500">
+                {series.length.toLocaleString()} bars
+              </span>
+              {onClose && (
+                <button
+                  onClick={onClose}
+                  title="Close chart (maximize chain)"
+                  className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-edge hover:text-white"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Chart area — container is ALWAYS mounted so the chart can be created up front */}
+      <div className="relative min-h-0 flex-1">
+        <div ref={wrapRef} className="absolute inset-0" />
+
+        {hasSelection ? (
+          <>
+            <div className="pointer-events-none absolute left-3 top-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
+              Price
+            </div>
+            <div className="pointer-events-none absolute bottom-12 left-3 text-[10px] font-semibold uppercase tracking-wider text-yellow-600/80">
+              Open Interest
+            </div>
+          </>
+        ) : (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-slate-600">
+            Click a CALL or PUT cell above, or use the search bar.
+          </div>
+        )}
+
+        {/* Active-indicator legend (with inline param editing) */}
+        {hasSelection && indicators.length > 0 && (
+          <div className="absolute left-3 top-7 z-10 flex max-w-[70%] flex-col gap-1">
+            {indicators.map((ind) => {
+              const def = INDICATORS[ind.key]
+              if (!def) return null
+              return (
+                <div key={ind.uid} className="w-fit rounded bg-panel2/85 px-1.5 py-0.5 text-[11px] shadow shadow-black/30 backdrop-blur">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-slate-200">
+                      {def.label ? def.label(ind.params) : def.name}
+                    </span>
+                    {def.params?.length > 0 && (
+                      <button
+                        onClick={() => setEditing((e) => (e === ind.uid ? null : ind.uid))}
+                        title="Settings"
+                        className="text-slate-500 hover:text-sky-300"
+                      >
+                        ⚙
+                      </button>
+                    )}
+                    <button
+                      onClick={() => removeIndicator(ind.uid)}
+                      title="Remove indicator"
+                      className="text-slate-500 hover:text-red-400"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  {editing === ind.uid && def.params?.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-2 border-t border-edge pt-1">
+                      {def.params.map((pp) => (
+                        <label key={pp.key} className="flex items-center gap-1 text-[10px] text-slate-400">
+                          {pp.label}
+                          <input
+                            type="number"
+                            value={ind.params[pp.key]}
+                            min={pp.min}
+                            max={pp.max}
+                            step={pp.step}
+                            onChange={(e) => updateParams(ind.uid, { [pp.key]: Number(e.target.value) })}
+                            className="w-14 rounded border border-edge bg-panel px-1 py-0.5 text-slate-200 outline-none focus:border-sky-600"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-ink/60 text-sm text-slate-300">
+            Loading full history…
+          </div>
+        )}
+        {error && (
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-red-400">
+            {error}
+          </div>
+        )}
+
+        {/* Crosshair tooltip */}
+        {tip && (
+          <div
+            className="pointer-events-none absolute z-20 w-40 rounded-md border border-edge bg-panel2/95 px-2.5 py-2 text-[11px] shadow-xl shadow-black/50 backdrop-blur"
+            style={{
+              left: Math.min(tip.x + 16, (wrapRef.current?.clientWidth || 0) - 172),
+              top: Math.max(8, Math.min(tip.y + 16, (wrapRef.current?.clientHeight || 0) - 150)),
+            }}
+          >
+            <div className="mb-1 flex justify-between text-slate-400">
+              <span>{fmtDateUTC(tip.c.time)}</span>
+              <span>{fmtTimeUTC(tip.c.time)}</span>
+            </div>
+            <Row label="O" value={tip.c.open.toFixed(2)} />
+            <Row label="H" value={tip.c.high.toFixed(2)} cls="text-green-400" />
+            <Row label="L" value={tip.c.low.toFixed(2)} cls="text-red-400" />
+            <Row
+              label="C"
+              value={tip.c.close.toFixed(2)}
+              cls={tip.c.close >= tip.c.open ? 'text-green-400' : 'text-red-400'}
+            />
+            <div className="my-1 border-t border-edge" />
+            <Row label="Vol" value={compact.format(tip.c.volume)} />
+            <Row label="OI" value={compact.format(tip.c.oi)} cls="text-yellow-400" />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Row({ label, value, cls = 'text-slate-200' }) {
+  return (
+    <div className="flex justify-between font-mono tabular-nums">
+      <span className="text-slate-500">{label}</span>
+      <span className={cls}>{value}</span>
+    </div>
+  )
+}

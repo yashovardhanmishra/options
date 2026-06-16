@@ -1,0 +1,97 @@
+// Frontend OHLCV+OI resampling and date-range filtering.
+//
+// Raw candles come from /api/chart as:
+//   { time: <unix seconds>, open, high, low, close, volume, oi }
+// `time` encodes the IST wall clock as UTC seconds, so flooring by interval
+// groups within the IST trading day exactly as a trader expects.
+
+// Interval length in seconds for each timeframe label.
+export const INTERVALS = {
+  '1m': 60,
+  '3m': 180,
+  '5m': 300,
+  '10m': 600,
+  '15m': 900,
+  '30m': 1800,
+  '1h': 3600,
+  '1D': 86400,
+}
+
+export const TIMEFRAMES = ['1m', '3m', '5m', '10m', '15m', '30m', '1h', '1D']
+
+/**
+ * Resample raw 1-minute candles into `tf`.
+ * Aggregation per bucket: open=first, high=max, low=min, close=last,
+ * volume=sum, oi=last. Output is ascending and unique (lightweight-charts safe).
+ */
+export function resample(raw, tf) {
+  if (!raw || raw.length === 0) return []
+  if (tf === '1m') return raw
+
+  const step = INTERVALS[tf]
+  if (!step) return raw
+
+  const buckets = new Map()
+  const order = []
+
+  for (const c of raw) {
+    // Floor to the start of the interval. For 1D this lands on IST midnight.
+    const bt = Math.floor(c.time / step) * step
+    let b = buckets.get(bt)
+    if (!b) {
+      b = {
+        time: bt,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: 0,
+        oi: c.oi,
+      }
+      buckets.set(bt, b)
+      order.push(bt)
+    } else {
+      if (c.high > b.high) b.high = c.high
+      if (c.low < b.low) b.low = c.low
+      b.close = c.close // last in the group
+      b.oi = c.oi // last in the group
+    }
+    b.volume += c.volume
+  }
+
+  // `order` is already ascending because `raw` is ascending.
+  return order.map((t) => buckets.get(t))
+}
+
+/**
+ * Keep candles whose time is within [fromSec, toSec]. Null bound = open-ended.
+ */
+export function filterByRange(data, fromSec, toSec) {
+  if (fromSec == null && toSec == null) return data
+  return data.filter(
+    (c) =>
+      (fromSec == null || c.time >= fromSec) &&
+      (toSec == null || c.time <= toSec),
+  )
+}
+
+/**
+ * Convert a <input type="date"> value ("YYYY-MM-DD") to unix seconds in the
+ * same wall-clock-as-UTC space used by the candle data.
+ * endOfDay=true returns 23:59:59 so a TO date is inclusive of its whole day.
+ */
+export function dateStrToSec(s, endOfDay = false) {
+  if (!s) return null
+  const ms = Date.parse(s + 'T00:00:00Z')
+  if (Number.isNaN(ms)) return null
+  return Math.floor(ms / 1000) + (endOfDay ? 86399 : 0)
+}
+
+/**
+ * Inverse of dateStrToSec — unix seconds -> "YYYY-MM-DD" (UTC parts).
+ * Used to seed the date pickers from the loaded data's span.
+ */
+export function secToDateStr(sec) {
+  if (sec == null) return ''
+  return new Date(sec * 1000).toISOString().slice(0, 10)
+}

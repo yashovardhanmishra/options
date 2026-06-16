@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #0a0e14;
+  color: #c7d2dc;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin dark scrollbars to match the terminal feel */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0e14;
+}
+::-webkit-scrollbar-thumb {
+  background: #243244;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #324560;
+}
+
+/* date / native inputs adopt the dark scheme */
+input[type='date'],
+select {
+  color-scheme: dark;
+}
