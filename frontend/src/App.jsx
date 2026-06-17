@@ -38,7 +38,48 @@ export default function App() {
     if (!session) return <Login />
   }
 
+  // Standalone Nifty spot chart, opened in its own tab via ?view=spot.
+  const view = new URLSearchParams(window.location.search).get('view')
+  if (view === 'spot') return <SpotPage userEmail={session?.user?.email} />
   return <Viewer userEmail={session?.user?.email} />
+}
+
+// Full-page Nifty index chart (own browser tab): all indicators, patterns,
+// timeframes + custom resampling, driven by the spot data feed.
+function SpotPage({ userEmail }) {
+  return (
+    <div className="flex h-screen flex-col overflow-hidden bg-ink text-slate-200">
+      <header className="flex items-center gap-4 border-b border-edge bg-panel px-4 py-2.5">
+        <div className="flex items-center gap-2">
+          <div className="h-5 w-1.5 rounded-full bg-gradient-to-b from-emerald-400 to-sky-400" />
+          <h1 className="text-sm font-bold tracking-wide text-slate-100">
+            NIFTY SPOT <span className="text-slate-500">— index chart</span>
+          </h1>
+        </div>
+        <a href={window.location.pathname} className="text-xs text-sky-400 hover:underline">
+          ← Options app
+        </a>
+        <div className="ml-auto flex items-center gap-2">
+          {authEnabled && userEmail && (
+            <span className="hidden max-w-[12rem] truncate text-xs text-slate-400 sm:inline" title={userEmail}>
+              {userEmail}
+            </span>
+          )}
+          {authEnabled && (
+            <button
+              onClick={signOut}
+              className="rounded-md border border-edge bg-panel2 px-2.5 py-1 text-xs text-slate-300 hover:bg-edge hover:text-white"
+            >
+              Sign out
+            </button>
+          )}
+        </div>
+      </header>
+      <main className="min-h-0 flex-1">
+        <ChartPanel spot />
+      </main>
+    </div>
+  )
 }
 
 function Viewer({ userEmail }) {
@@ -153,6 +194,14 @@ function Viewer({ userEmail }) {
             NIFTY OPTIONS <span className="text-slate-500">— chain &amp; chart</span>
           </h1>
         </div>
+        <button
+          onClick={() => window.open(window.location.pathname + '?view=spot', '_blank', 'noopener')}
+          title="Open the Nifty spot index chart in a new tab"
+          className="flex items-center gap-1.5 rounded-md border border-emerald-700/60 bg-emerald-600/15 px-2.5 py-1 text-xs font-medium text-emerald-300 hover:bg-emerald-600/30"
+        >
+          <span className="text-sm leading-none">📈</span> Nifty Spot
+          <span className="text-[10px] opacity-70">↗</span>
+        </button>
         {!chainOpen && (
           <button
             onClick={openChain}

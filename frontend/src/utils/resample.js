@@ -12,12 +12,31 @@ export const INTERVALS = {
   '5m': 300,
   '10m': 600,
   '15m': 900,
+  '20m': 1200,
   '30m': 1800,
+  '45m': 2700,
   '1h': 3600,
+  '90m': 5400,
+  '2h': 7200,
   '1D': 86400,
 }
 
-export const TIMEFRAMES = ['1m', '3m', '5m', '10m', '15m', '30m', '1h', '1D']
+export const TIMEFRAMES = ['1m', '3m', '5m', '10m', '15m', '20m', '30m', '45m', '1h', '90m', '2h', '1D']
+
+/**
+ * Parse any timeframe label to seconds: '5m', '90m', '2h', '1D', or a bare
+ * number ('7' -> 7 minutes) for the custom box. Falls back to the INTERVALS map.
+ */
+export function tfToSeconds(tf) {
+  const s = String(tf ?? '').trim().toLowerCase()
+  const m = s.match(/^(\d+(?:\.\d+)?)\s*(m|min|mins|h|hr|hrs|hour|hours|d|day|days)?$/)
+  if (!m) return INTERVALS[tf] ?? 60
+  const n = parseFloat(m[1])
+  const u = m[2] || 'm'
+  if (u[0] === 'h') return Math.round(n * 3600)
+  if (u[0] === 'd') return Math.round(n * 86400)
+  return Math.round(n * 60)
+}
 
 /**
  * Resample raw 1-minute candles into `tf`.
@@ -26,10 +45,9 @@ export const TIMEFRAMES = ['1m', '3m', '5m', '10m', '15m', '30m', '1h', '1D']
  */
 export function resample(raw, tf) {
   if (!raw || raw.length === 0) return []
-  if (tf === '1m') return raw
 
-  const step = INTERVALS[tf]
-  if (!step) return raw
+  const step = tfToSeconds(tf)
+  if (!step || step <= 60) return raw // 1-minute (or finer) = passthrough
 
   const buckets = new Map()
   const order = []

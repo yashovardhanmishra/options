@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createChart, CrosshairMode } from 'lightweight-charts'
 import { format, parse } from 'date-fns'
-import { getChart } from '../api'
+import { getChart, getSpot } from '../api'
 import {
   resample,
   filterByRange,
@@ -40,7 +40,7 @@ const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFra
 // indicator value: 2 decimals, but compact for big ones (OBV, A/D, PVT…)
 const fmtVal = (v) => (Math.abs(v) >= 100000 ? compact.format(v) : v.toFixed(2))
 
-export default function ChartPanel({ selection, onClose }) {
+export default function ChartPanel({ selection, onClose, spot = false }) {
   const wrapRef = useRef(null)
   const chartRef = useRef(null)
   const candleRef = useRef(null)
@@ -51,7 +51,8 @@ export default function ChartPanel({ selection, onClose }) {
   const uidRef = useRef(0)
 
   const [raw, setRaw] = useState([])
-  const [tf, setTf] = useState('5m')
+  const [tf, setTf] = useState(spot ? '15m' : '5m')
+  const [customTf, setCustomTf] = useState('') // value of the custom-minutes box
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [loading, setLoading] = useState(false)
@@ -130,13 +131,14 @@ export default function ChartPanel({ selection, onClose }) {
     chart.priceScale('oi').applyOptions({ scaleMargins: { top: startY + oscCount * paneH, bottom: 0 } })
   }
 
-  // ----- load full history for the selected instrument -----
+  // ----- load full history (option strike, or the Nifty spot index) -----
   useEffect(() => {
-    if (!selection) return
+    if (!spot && !selection) return
     let cancelled = false
     setLoading(true)
     setError(null)
-    getChart(selection.expiry, selection.strike, selection.type)
+    const req = spot ? getSpot() : getChart(selection.expiry, selection.strike, selection.type)
+    req
       .then((data) => {
         if (cancelled) return
         setRaw(data)
@@ -152,7 +154,7 @@ export default function ChartPanel({ selection, onClose }) {
     return () => {
       cancelled = true
     }
-  }, [selection])
+  }, [selection, spot])
 
   // data span (for date-picker bounds)
   const span = useMemo(() => {
@@ -178,7 +180,7 @@ export default function ChartPanel({ selection, onClose }) {
     const ois = []
     for (const c of s) {
       candles.push({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })
-      ois.push({ time: c.time, value: c.oi })
+      ois.push({ time: c.time, value: spot ? c.volume : c.oi })
       map.set(c.time, c)
     }
     candleRef.current.setData(candles)
@@ -240,14 +242,23 @@ export default function ChartPanel({ selection, onClose }) {
       priceLineVisible: false,
       lastValueVisible: true,
     })
-    const oi = chart.addLineSeries({
-      priceScaleId: 'oi',
-      color: '#eab308',
-      lineWidth: 2,
-      priceLineVisible: false,
-      lastValueVisible: true,
-      crosshairMarkerVisible: true,
-    })
+    // Bottom pane: open interest (options) or traded volume (spot index).
+    const oi = spot
+      ? chart.addHistogramSeries({
+          priceScaleId: 'oi',
+          color: 'rgba(96,165,250,0.55)',
+          priceFormat: { type: 'volume' },
+          priceLineVisible: false,
+          lastValueVisible: true,
+        })
+      : chart.addLineSeries({
+          priceScaleId: 'oi',
+          color: '#eab308',
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: true,
+          crosshairMarkerVisible: true,
+        })
     chart.priceScale('oi').applyOptions({ borderColor: '#1e2a3a' })
 
     chart.subscribeCrosshairMove((param) => {
@@ -412,13 +423,20 @@ export default function ChartPanel({ selection, onClose }) {
   }, [series, patterns, patternCode])
 
   const hasSelection = !!selection
+  const ready = spot || hasSelection
 
   return (
     <div className="flex h-full flex-col">
       {/* Header bar */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-edge bg-panel px-4 py-2">
         <div className="text-sm font-semibold text-slate-100">
-          {hasSelection ? (
+          {spot ? (
+            <>
+              <span className="text-base">NIFTY</span>{' '}
+              <span className="text-emerald-400">Spot</span>
+              <span className="ml-2 text-xs font-normal text-slate-500">Index · 1-min source</span>
+            </>
+          ) : hasSelection ? (
             <>
               <span className="text-base">{selection.strike}</span>{' '}
               <span className={selection.type === 'CE' ? 'text-sky-400' : 'text-orange-400'}>
@@ -433,7 +451,7 @@ export default function ChartPanel({ selection, onClose }) {
           )}
         </div>
 
-        {hasSelection && (
+        {ready && (
           <>
             {/* Timeframe toggle */}
             <div className="flex overflow-hidden rounded-md border border-edge">
@@ -451,6 +469,23 @@ export default function ChartPanel({ selection, onClose }) {
                 </button>
               ))}
             </div>
+
+            {/* Custom timeframe: type minutes (e.g. 7) + Enter -> resamples to 7m */}
+            <input
+              type="text"
+              inputMode="numeric"
+              value={customTf}
+              onChange={(e) => setCustomTf(e.target.value.replace(/[^0-9]/g, ''))}
+              onKeyDown={(e) => e.key === 'Enter' && customTf && setTf(`${customTf}m`)}
+              onBlur={() => customTf && setTf(`${customTf}m`)}
+              placeholder="min"
+              title="Custom timeframe in minutes — type a number and press Enter"
+              className={`w-16 rounded border px-2 py-1 text-center text-xs outline-none transition-colors ${
+                customTf && tf === `${customTf}m`
+                  ? 'border-sky-600 bg-sky-600/20 text-sky-200'
+                  : 'border-edge bg-panel2 text-slate-300 placeholder:text-slate-500 focus:border-sky-600'
+              }`}
+            />
 
             <IndicatorMenu onAdd={addIndicator} onAddPattern={addPattern} onViewCode={viewCode} />
 
@@ -508,13 +543,17 @@ export default function ChartPanel({ selection, onClose }) {
       <div className="relative min-h-0 flex-1">
         <div ref={wrapRef} className="absolute inset-0" />
 
-        {hasSelection ? (
+        {ready ? (
           <>
             <div className="pointer-events-none absolute left-3 top-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
               Price
             </div>
-            <div className="pointer-events-none absolute bottom-12 left-3 text-[10px] font-semibold uppercase tracking-wider text-yellow-600/80">
-              Open Interest
+            <div
+              className={`pointer-events-none absolute bottom-12 left-3 text-[10px] font-semibold uppercase tracking-wider ${
+                spot ? 'text-sky-600/80' : 'text-yellow-600/80'
+              }`}
+            >
+              {spot ? 'Volume' : 'Open Interest'}
             </div>
           </>
         ) : (
@@ -524,7 +563,7 @@ export default function ChartPanel({ selection, onClose }) {
         )}
 
         {/* Active indicator + pattern legend (with inline param editing) */}
-        {hasSelection && (indicators.length > 0 || patterns.length > 0) && (
+        {ready && (indicators.length > 0 || patterns.length > 0) && (
           <div className="absolute left-3 top-7 z-10 flex max-w-[70%] flex-col gap-1">
             {indicators.map((ind) => {
               const def = INDICATORS[ind.key]
@@ -651,8 +690,8 @@ export default function ChartPanel({ selection, onClose }) {
               cls={tip.c.close >= tip.c.open ? 'text-green-400' : 'text-red-400'}
             />
             <div className="my-1 border-t border-edge" />
-            <Row label="Vol" value={compact.format(tip.c.volume)} />
-            <Row label="OI" value={compact.format(tip.c.oi)} cls="text-yellow-400" />
+            <Row label="Vol" value={compact.format(tip.c.volume)} cls={spot ? 'text-sky-300' : 'text-slate-200'} />
+            {!spot && <Row label="OI" value={compact.format(tip.c.oi)} cls="text-yellow-400" />}
 
             {tip.inds && tip.inds.length > 0 && (
               <>

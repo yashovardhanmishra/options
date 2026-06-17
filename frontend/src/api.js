@@ -38,5 +38,16 @@ export const getChain = (expiry, date, time) =>
 export const getChart = (expiry, strike, type) =>
   api.get('/api/chart', { params: { expiry, strike, type } }).then((r) => r.data)
 
+// Nifty index (spot): columnar {t,o,h,l,c,v} -> candle rows (oi unused for spot).
+export const getSpot = () =>
+  api.get('/api/spot').then((r) => {
+    const d = r.data
+    const out = new Array(d.t.length)
+    for (let i = 0; i < d.t.length; i++) {
+      out[i] = { time: d.t[i], open: d.o[i], high: d.h[i], low: d.l[i], close: d.c[i], volume: d.v[i], oi: 0 }
+    }
+    return out
+  })
+
 export const search = (q) =>
   api.get('/api/search', { params: { q } }).then((r) => r.data)

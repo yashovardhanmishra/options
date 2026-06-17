@@ -23,6 +23,7 @@ from pathlib import Path
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -41,6 +42,10 @@ DATA_DIR = Path(os.environ.get("DATA_DIR") or Path(__file__).resolve().parent).r
 # Static frontend build (served by this same process in production). Override
 # with FRONTEND_DIR; defaults to ./frontend/dist next to this file.
 FRONTEND_DIR = Path(os.environ.get("FRONTEND_DIR") or Path(__file__).resolve().parent / "frontend" / "dist")
+
+# Nifty index (spot) 1-min OHLCV CSV for the standalone spot chart. Defaults to
+# nifty.csv next to the data; override with SPOT_CSV.
+SPOT_CSV = Path(os.environ.get("SPOT_CSV") or (DATA_DIR / "nifty.csv"))
 
 # How many of the newest expiries to pre-parse on startup (warms the cache so the
 # first page load is fast). Set WARM_EXPIRIES=0 to disable.
@@ -101,6 +106,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Compress large JSON (the spot history is a few MB) when the client accepts it.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 @app.middleware("http")
@@ -296,6 +303,40 @@ def read_csv(path: Path) -> pd.DataFrame:
 
 
 @lru_cache(maxsize=1)
+def _read_spot(path_str: str, _mtime: float):
+    """Parse the Nifty index 1-min OHLCV CSV into columnar arrays (cached once).
+    Accepts `datetime,open,high,low,close[,volume]` (ISO) or
+    `Date,Time,Open,High,Low,Close[,Volume]` (DD/MM/YYYY)."""
+    df = pd.read_csv(path_str)
+    df.columns = [c.strip().lower() for c in df.columns]
+    if "datetime" in df.columns:
+        dt = pd.to_datetime(df["datetime"].astype(str).str.strip(), errors="coerce")
+    else:
+        dt = pd.to_datetime(
+            df["date"].astype(str).str.strip() + " " + df["time"].astype(str).str.strip(),
+            format="%d/%m/%Y %H:%M:%S", errors="coerce",
+        )
+    df = df.assign(__dt=dt).dropna(subset=["__dt", "open", "high", "low", "close"])
+    df = df.sort_values("__dt").drop_duplicates(subset="__dt", keep="last")
+    unix = ((df["__dt"] - EPOCH) // ONE_SEC).astype("int64")
+    vol = (df["volume"] if "volume" in df.columns else pd.Series(0, index=df.index)).fillna(0)
+    return {
+        "t": unix.tolist(),
+        "o": df["open"].astype(float).tolist(),
+        "h": df["high"].astype(float).tolist(),
+        "l": df["low"].astype(float).tolist(),
+        "c": df["close"].astype(float).tolist(),
+        "v": vol.astype(float).tolist(),
+    }
+
+
+def read_spot():
+    if not SPOT_CSV.is_file():
+        raise HTTPException(404, f"Spot data file not found at {SPOT_CSV}")
+    return _read_spot(str(SPOT_CSV), SPOT_CSV.stat().st_mtime)
+
+
+@lru_cache(maxsize=1)
 def _instrument_index():
     """(strike, type, expiry) for every option file — built from filenames only."""
     idx = []
@@ -436,6 +477,13 @@ def chart(expiry: str = Query(...), strike: int = Query(...), type: str = Query(
     ]
 
 
+@app.get("/api/spot")
+def spot():
+    """Full 1-min Nifty index (spot) history as columnar arrays {t,o,h,l,c,v}.
+    Columnar keeps the payload small; the frontend zips it into candles."""
+    return read_spot()
+
+
 @app.get("/api/search")
 def search(q: str = Query(...), limit: int = 40):
     """
@@ -471,7 +519,7 @@ def api_info():
     return {
         "service": "Nifty Options Chain API",
         "data_dir": str(DATA_DIR),
-        "endpoints": ["/api/expiries", "/api/dates", "/api/times", "/api/chain", "/api/chart", "/api/search"],
+        "endpoints": ["/api/expiries", "/api/dates", "/api/times", "/api/chain", "/api/chart", "/api/spot", "/api/search"],
     }
 
 
