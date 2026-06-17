@@ -10,7 +10,10 @@ import {
   TIMEFRAMES,
 } from '../utils/resample'
 import { INDICATORS, defaultParams } from '../utils/indicators'
+import { buildMarkers, PATTERN_BY_KEY, PATTERN_PINE } from '../utils/patterns'
+import { INDICATOR_PINE } from '../utils/pinescript'
 import IndicatorMenu from './IndicatorMenu'
+import CodeModal from './CodeModal'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const pad = (n) => String(n).padStart(2, '0')
@@ -55,6 +58,8 @@ export default function ChartPanel({ selection, onClose }) {
   const [tip, setTip] = useState(null)
   const [indicators, setIndicators] = useState([]) // [{ uid, key, params }]
   const [editing, setEditing] = useState(null) // uid whose params are being edited
+  const [patterns, setPatterns] = useState([]) // active pattern keys (markers on candles)
+  const [codeView, setCodeView] = useState(null) // { title, subtitle, code } for the Pine modal
 
   const addIndicator = (key) =>
     setIndicators((list) => [...list, { uid: ++uidRef.current, key, params: defaultParams(key) }])
@@ -66,6 +71,20 @@ export default function ChartPanel({ selection, onClose }) {
     setIndicators((list) =>
       list.map((x) => (x.uid === uid ? { ...x, params: { ...x.params, ...patch } } : x)),
     )
+
+  const addPattern = (key) => setPatterns((list) => (list.includes(key) ? list : [...list, key]))
+  const removePattern = (key) => setPatterns((list) => list.filter((k) => k !== key))
+
+  // Open the Pine-script modal for an indicator or a pattern.
+  const viewCode = (kind, key) => {
+    if (kind === 'pattern') {
+      const p = PATTERN_BY_KEY[key]
+      setCodeView({ title: p?.name || key, subtitle: p?.type, code: PATTERN_PINE[key] })
+    } else {
+      const d = INDICATORS[key]
+      setCodeView({ title: d?.name || key, subtitle: d?.category, code: INDICATOR_PINE[key] })
+    }
+  }
 
   // Stack the candle pane (top) above the OI pane and any oscillator panes.
   const relayout = (oscCount) => {
@@ -340,6 +359,17 @@ export default function ChartPanel({ selection, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [series, indicators])
 
+  // ----- candlestick-pattern markers on the price series -----
+  useEffect(() => {
+    if (!candleRef.current) return
+    try {
+      candleRef.current.setMarkers(buildMarkers(patterns, seriesRef.current))
+    } catch {
+      /* chart disposed mid-update */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [series, patterns])
+
   const hasSelection = !!selection
 
   return (
@@ -381,7 +411,7 @@ export default function ChartPanel({ selection, onClose }) {
               ))}
             </div>
 
-            <IndicatorMenu onAdd={addIndicator} />
+            <IndicatorMenu onAdd={addIndicator} onAddPattern={addPattern} onViewCode={viewCode} />
 
             {/* Date range */}
             <div className="flex items-center gap-1.5 text-xs text-slate-400">
@@ -452,8 +482,8 @@ export default function ChartPanel({ selection, onClose }) {
           </div>
         )}
 
-        {/* Active-indicator legend (with inline param editing) */}
-        {hasSelection && indicators.length > 0 && (
+        {/* Active indicator + pattern legend (with inline param editing) */}
+        {hasSelection && (indicators.length > 0 || patterns.length > 0) && (
           <div className="absolute left-3 top-7 z-10 flex max-w-[70%] flex-col gap-1">
             {indicators.map((ind) => {
               const def = INDICATORS[ind.key]
@@ -464,6 +494,13 @@ export default function ChartPanel({ selection, onClose }) {
                     <span className="font-medium text-slate-200">
                       {def.label ? def.label(ind.params) : def.name}
                     </span>
+                    <button
+                      onClick={() => viewCode('indicator', ind.key)}
+                      title="View Pine Script"
+                      className="font-mono text-[10px] leading-none text-slate-500 hover:text-sky-300"
+                    >
+                      {'{ }'}
+                    </button>
                     {def.params?.length > 0 && (
                       <button
                         onClick={() => setEditing((e) => (e === ind.uid ? null : ind.uid))}
@@ -499,6 +536,33 @@ export default function ChartPanel({ selection, onClose }) {
                       ))}
                     </div>
                   )}
+                </div>
+              )
+            })}
+            {patterns.map((key) => {
+              const p = PATTERN_BY_KEY[key]
+              if (!p) return null
+              const col = p.dir === 'bull' ? '#22c55e' : p.dir === 'bear' ? '#ef4444' : '#9ca3af'
+              return (
+                <div key={key} className="w-fit rounded bg-panel2/85 px-1.5 py-0.5 text-[11px] shadow shadow-black/30 backdrop-blur">
+                  <div className="flex items-center gap-1.5">
+                    <span style={{ color: col }}>◆</span>
+                    <span className="font-medium text-slate-200">{p.name}</span>
+                    <button
+                      onClick={() => viewCode('pattern', key)}
+                      title="View Pine Script"
+                      className="font-mono text-[10px] leading-none text-slate-500 hover:text-sky-300"
+                    >
+                      {'{ }'}
+                    </button>
+                    <button
+                      onClick={() => removePattern(key)}
+                      title="Remove pattern"
+                      className="text-slate-500 hover:text-red-400"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
               )
             })}
@@ -562,6 +626,15 @@ export default function ChartPanel({ selection, onClose }) {
           </div>
         )}
       </div>
+
+      {codeView && (
+        <CodeModal
+          title={codeView.title}
+          subtitle={codeView.subtitle}
+          code={codeView.code}
+          onClose={() => setCodeView(null)}
+        />
+      )}
     </div>
   )
 }
