@@ -10,7 +10,8 @@ import {
   TIMEFRAMES,
 } from '../utils/resample'
 import { INDICATORS, defaultParams } from '../utils/indicators'
-import { buildMarkers, PATTERN_BY_KEY, PATTERN_PINE } from '../utils/patterns'
+import { detectPattern, PATTERN_BY_KEY, PATTERN_PINE } from '../utils/patterns'
+import { evalPine } from '../utils/pine'
 import { INDICATOR_PINE } from '../utils/pinescript'
 import IndicatorMenu from './IndicatorMenu'
 import CodeModal from './CodeModal'
@@ -59,7 +60,8 @@ export default function ChartPanel({ selection, onClose }) {
   const [indicators, setIndicators] = useState([]) // [{ uid, key, params }]
   const [editing, setEditing] = useState(null) // uid whose params are being edited
   const [patterns, setPatterns] = useState([]) // active pattern keys (markers on candles)
-  const [codeView, setCodeView] = useState(null) // { title, subtitle, code } for the Pine modal
+  const [patternCode, setPatternCode] = useState({}) // key -> edited Pine (overrides default detector)
+  const [codeView, setCodeView] = useState(null) // open Pine modal descriptor
 
   const addIndicator = (key) =>
     setIndicators((list) => [...list, { uid: ++uidRef.current, key, params: defaultParams(key) }])
@@ -75,14 +77,39 @@ export default function ChartPanel({ selection, onClose }) {
   const addPattern = (key) => setPatterns((list) => (list.includes(key) ? list : [...list, key]))
   const removePattern = (key) => setPatterns((list) => list.filter((k) => k !== key))
 
-  // Open the Pine-script modal for an indicator or a pattern.
+  // Apply edited Pine to a pattern: validate it, store as an override, and make
+  // sure it's shown. Returns an error string (displayed in the modal) or null.
+  const applyPatternCode = (key, code) => {
+    const { error } = evalPine(code, seriesRef.current)
+    if (error) return error
+    setPatternCode((m) => ({ ...m, [key]: code }))
+    setPatterns((list) => (list.includes(key) ? list : [...list, key]))
+    return null
+  }
+  const resetPatternCode = (key) =>
+    setPatternCode((m) => {
+      const next = { ...m }
+      delete next[key]
+      return next
+    })
+
+  // Open the Pine-script modal. Patterns are editable (Apply redraws markers);
+  // indicators are read-only.
   const viewCode = (kind, key) => {
     if (kind === 'pattern') {
       const p = PATTERN_BY_KEY[key]
-      setCodeView({ title: p?.name || key, subtitle: p?.type, code: PATTERN_PINE[key] })
+      setCodeView({
+        kind: 'pattern',
+        key,
+        editable: true,
+        title: p?.name || key,
+        subtitle: p?.type,
+        code: patternCode[key] || PATTERN_PINE[key],
+        defaultCode: PATTERN_PINE[key],
+      })
     } else {
       const d = INDICATORS[key]
-      setCodeView({ title: d?.name || key, subtitle: d?.category, code: INDICATOR_PINE[key] })
+      setCodeView({ kind: 'indicator', editable: false, title: d?.name || key, subtitle: d?.category, code: INDICATOR_PINE[key] })
     }
   }
 
@@ -360,15 +387,29 @@ export default function ChartPanel({ selection, onClose }) {
   }, [series, indicators])
 
   // ----- candlestick-pattern markers on the price series -----
+  // A pattern with edited Pine (patternCode) is detected by running that script
+  // through the Pine evaluator; otherwise the built-in JS detector is used.
   useEffect(() => {
     if (!candleRef.current) return
+    const candles = seriesRef.current
+    const all = []
+    for (const key of patterns) {
+      const code = patternCode[key]
+      if (code) {
+        all.push(...evalPine(code, candles).markers)
+      } else {
+        const p = PATTERN_BY_KEY[key]
+        if (p) all.push(...detectPattern(p, candles))
+      }
+    }
+    all.sort((a, b) => a.time - b.time)
     try {
-      candleRef.current.setMarkers(buildMarkers(patterns, seriesRef.current))
+      candleRef.current.setMarkers(all)
     } catch {
       /* chart disposed mid-update */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [series, patterns])
+  }, [series, patterns, patternCode])
 
   const hasSelection = !!selection
 
@@ -548,9 +589,14 @@ export default function ChartPanel({ selection, onClose }) {
                   <div className="flex items-center gap-1.5">
                     <span style={{ color: col }}>◆</span>
                     <span className="font-medium text-slate-200">{p.name}</span>
+                    {patternCode[key] && (
+                      <span title="Custom Pine applied" className="text-[10px] leading-none text-sky-400">
+                        ✎
+                      </span>
+                    )}
                     <button
                       onClick={() => viewCode('pattern', key)}
-                      title="View Pine Script"
+                      title="View / edit Pine Script"
                       className="font-mono text-[10px] leading-none text-slate-500 hover:text-sky-300"
                     >
                       {'{ }'}
@@ -632,6 +678,10 @@ export default function ChartPanel({ selection, onClose }) {
           title={codeView.title}
           subtitle={codeView.subtitle}
           code={codeView.code}
+          defaultCode={codeView.defaultCode}
+          editable={codeView.editable}
+          onApply={codeView.editable ? (txt) => applyPatternCode(codeView.key, txt) : undefined}
+          onReset={codeView.editable ? () => resetPatternCode(codeView.key) : undefined}
           onClose={() => setCodeView(null)}
         />
       )}

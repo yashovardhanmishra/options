@@ -436,16 +436,18 @@ indicator("Morning Star", overlay=true)
 ba = math.abs(close[2] - open[2])
 bb = math.abs(close[1] - open[1])
 mida = (open[2] + close[2]) / 2
+avg = ta.sma(math.abs(close - open), 10)[3]
 down = close[3] < close[6]
-ms = close[2] < open[2] and bb <= 0.5 * ba and math.max(open[1], close[1]) <= math.min(open[2], close[2]) + 0.05 * (high[2] - low[2]) and close > open and close > mida and down
+ms = close[2] < open[2] and ba >= avg and bb <= 0.5 * ba and math.max(open[1], close[1]) <= math.min(open[2], close[2]) + 0.05 * (high[2] - low[2]) and close > open and close > mida and down
 plotshape(ms, "Morning Star", shape.triangleup, location.belowbar, color.green, text="MS")`,
   evening_star: `//@version=5
 indicator("Evening Star", overlay=true)
 ba = math.abs(close[2] - open[2])
 bb = math.abs(close[1] - open[1])
 mida = (open[2] + close[2]) / 2
+avg = ta.sma(math.abs(close - open), 10)[3]
 up = close[3] > close[6]
-es = close[2] > open[2] and bb <= 0.5 * ba and math.min(open[1], close[1]) >= math.max(open[2], close[2]) - 0.05 * (high[2] - low[2]) and close < open and close < mida and up
+es = close[2] > open[2] and ba >= avg and bb <= 0.5 * ba and math.min(open[1], close[1]) >= math.max(open[2], close[2]) - 0.05 * (high[2] - low[2]) and close < open and close < mida and up
 plotshape(es, "Evening Star", shape.triangledown, location.abovebar, color.red, text="ES")`,
   morning_doji_star: `//@version=5
 indicator("Morning Doji Star", overlay=true)
