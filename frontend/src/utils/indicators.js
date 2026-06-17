@@ -280,14 +280,14 @@ export const INDICATORS = {
         if (up) upLine[i] = fl
         else dnLine[i] = fu
       }
-      // Include EVERY time as whitespace where the trend is inactive, so the line
-      // BREAKS at flips (no diagonal connector), and step it so it trails price.
+      // Every time gets a point: a value where the trend is active, else WHITESPACE
+      // ({time} only). A plain line breaks at whitespace, so green/red never connect
+      // across a flip. (Stepped lines hold the last value across gaps, so don't use it.)
       const seg = (arr, id, color) => ({
         id,
         kind: 'line',
         color,
         lineWidth: 2,
-        stepped: true,
         data: c.map((x, i) => (arr[i] != null ? { time: x.time, value: arr[i] } : { time: x.time })),
       })
       return [seg(upLine, 'up', C.green), seg(dnLine, 'down', C.red)]
