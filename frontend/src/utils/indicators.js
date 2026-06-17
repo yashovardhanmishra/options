@@ -246,6 +246,46 @@ export const INDICATORS = {
       ]
     },
   },
+  supertrend: {
+    key: 'supertrend', name: 'Supertrend', category: 'Trend', overlay: true,
+    params: [
+      { key: 'atr', label: 'ATR', default: 10, min: 1, max: 100, step: 1 },
+      { key: 'mult', label: 'Mult', default: 3, min: 0.5, max: 10, step: 0.1 },
+    ],
+    label: (p) => `Supertrend ${p.atr},${p.mult}`,
+    compute: (c, p) => {
+      const atr = RMA(trueRange(c), p.atr)
+      const upLine = new Array(c.length).fill(null) // uptrend (line below price) — green
+      const dnLine = new Array(c.length).fill(null) // downtrend (line above price) — red
+      let fu = null
+      let fl = null
+      let up = true
+      let started = false
+      for (let i = 0; i < c.length; i++) {
+        if (atr[i] == null) continue
+        const hl2 = (c[i].high + c[i].low) / 2
+        const bu = hl2 + p.mult * atr[i]
+        const bl = hl2 - p.mult * atr[i]
+        const pc = i > 0 ? c[i - 1].close : c[i].close
+        fu = !started || bu < fu || pc > fu ? bu : fu
+        fl = !started || bl > fl || pc < fl ? bl : fl
+        if (!started) {
+          up = c[i].close >= bl
+          started = true
+        } else if (up && c[i].close < fl) {
+          up = false
+        } else if (!up && c[i].close > fu) {
+          up = true
+        }
+        if (up) upLine[i] = fl
+        else dnLine[i] = fu
+      }
+      return [
+        line(c, upLine, 'up', C.green, { lineWidth: 2 }),
+        line(c, dnLine, 'down', C.red, { lineWidth: 2 }),
+      ]
+    },
+  },
   adx: {
     key: 'adx', name: 'Average Directional Index (ADX)', category: 'Trend', overlay: false,
     params: [len(14)], refs: [{ value: 25, color: '#475569' }], label: (p) => `ADX ${p.length}`,
