@@ -255,13 +255,14 @@ export const INDICATORS = {
     label: (p) => `Supertrend ${p.atr},${p.mult}`,
     compute: (c, p) => {
       const atr = RMA(trueRange(c), p.atr)
-      const upLine = new Array(c.length).fill(null) // uptrend (line below price) — green
-      const dnLine = new Array(c.length).fill(null) // downtrend (line above price) — red
+      const n = c.length
+      const st = new Array(n).fill(null) // supertrend value (active band) per bar
+      const up = new Array(n).fill(false) // trend direction per bar
       let fu = null
       let fl = null
-      let up = true
+      let trend = true
       let started = false
-      for (let i = 0; i < c.length; i++) {
+      for (let i = 0; i < n; i++) {
         if (atr[i] == null) continue
         const hl2 = (c[i].high + c[i].low) / 2
         const bu = hl2 + p.mult * atr[i]
@@ -270,27 +271,31 @@ export const INDICATORS = {
         fu = !started || bu < fu || pc > fu ? bu : fu
         fl = !started || bl > fl || pc < fl ? bl : fl
         if (!started) {
-          up = c[i].close >= bl
+          trend = c[i].close >= bl
           started = true
-        } else if (up && c[i].close < fl) {
-          up = false
-        } else if (!up && c[i].close > fu) {
-          up = true
+        } else if (trend && c[i].close < fl) {
+          trend = false
+        } else if (!trend && c[i].close > fu) {
+          trend = true
         }
-        if (up) upLine[i] = fl
-        else dnLine[i] = fu
+        st[i] = trend ? fl : fu
+        up[i] = trend
       }
-      // Every time gets a point: a value where the trend is active, else WHITESPACE
-      // ({time} only). A plain line breaks at whitespace, so green/red never connect
-      // across a flip. (Stepped lines hold the last value across gaps, so don't use it.)
-      const seg = (arr, id, color) => ({
-        id,
-        kind: 'line',
-        color,
-        lineWidth: 2,
-        data: c.map((x, i) => (arr[i] != null ? { time: x.time, value: arr[i] } : { time: x.time })),
-      })
-      return [seg(upLine, 'up', C.green), seg(dnLine, 'down', C.red)]
+      // ONE continuous line, coloured per point. In lightweight-charts v4 the line
+      // renderer strokes each segment with its LEFT point's colour, so we colour each
+      // bar by its trend (green up / red down) and paint the single flip segment
+      // TRANSPARENT — that breaks the line cleanly at every flip (the band jumps from
+      // below price to above), instead of drawing a connector across the gap.
+      // Whitespace does NOT break a v4 line (it draws straight through), which is why
+      // the two-series approach drew long diagonals; per-point colour is the fix.
+      const GAP = 'rgba(0,0,0,0)'
+      const data = []
+      for (let i = 0; i < n; i++) {
+        if (st[i] == null) continue
+        const flips = i + 1 < n && st[i + 1] != null && up[i + 1] !== up[i]
+        data.push({ time: c[i].time, value: st[i], color: flips ? GAP : up[i] ? C.green : C.red })
+      }
+      return [{ id: 'st', kind: 'line', color: C.green, lineWidth: 2, data }]
     },
   },
   adx: {
