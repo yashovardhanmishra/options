@@ -43,6 +43,23 @@ export function tfToSeconds(tf) {
  * Aggregation per bucket: open=first, high=max, low=min, close=last,
  * volume=sum, oi=last. Output is ascending and unique (lightweight-charts safe).
  */
+// NSE cash/index session opens at 09:15 IST. Intraday bars are anchored to that
+// open (09:15–10:15, 10:15–11:15, …) rather than the clock hour, matching how
+// Indian charting platforms bucket intraday candles.
+const SESSION_OPEN_SEC = 9 * 3600 + 15 * 60 // 33300 (09:15 from IST midnight)
+
+// Start of the bucket `time` falls into for interval `step` (seconds). Intraday
+// (< 1 day) anchors to each IST day's 09:15 open; daily and above floor to IST
+// midnight (the calendar trading day).
+export function bucketStart(time, step) {
+  if (step >= 86400) return Math.floor(time / step) * step
+  const dayStart = Math.floor(time / 86400) * 86400
+  const open = dayStart + SESSION_OPEN_SEC
+  const off = time - open
+  if (off < 0) return open // fold any pre-open ticks into the first session bar
+  return open + Math.floor(off / step) * step
+}
+
 export function resample(raw, tf) {
   if (!raw || raw.length === 0) return []
 
@@ -53,8 +70,8 @@ export function resample(raw, tf) {
   const order = []
 
   for (const c of raw) {
-    // Floor to the start of the interval. For 1D this lands on IST midnight.
-    const bt = Math.floor(c.time / step) * step
+    // Anchor intraday buckets to the 09:15 session open (1D -> IST midnight).
+    const bt = bucketStart(c.time, step)
     let b = buckets.get(bt)
     if (!b) {
       b = {
