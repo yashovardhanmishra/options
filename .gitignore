@@ -15,6 +15,7 @@ nifty.csv
 __pycache__/
 *.pyc
 .venv/
+.venv-dhan/
 venv/
 env/
 
@@ -44,3 +45,8 @@ equity_curve*.png
 .env
 .env.*
 !.env.example
+
+# ---- Dhan downloader tooling (not part of the viewer app) ----
+dhan_*.py
+dhan_*.json
+dhan_*.log
