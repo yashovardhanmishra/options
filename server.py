@@ -211,6 +211,49 @@ def _db_chart(expiry, strike, side):
     ]
 
 
+def _db_chain_day(expiry, date):
+    rows = _q(
+        "SELECT strike, type, unix, open, high, low, close, volume, oi FROM bars "
+        "WHERE expiry = ? AND date = ? ORDER BY strike, type, unix",
+        [expiry, date],
+    )
+    insts: dict[tuple, list] = {}
+    order = []
+    for strike, typ, u, o, h, lo, c, v, oi in rows:
+        key = (int(strike), typ)
+        bucket = insts.get(key)
+        if bucket is None:
+            bucket = []
+            insts[key] = bucket
+            order.append(key)
+        bucket.append([int(u), float(o), float(h), float(lo), float(c), float(v), float(oi)])
+    return {
+        "expiry": expiry, "date": date,
+        "instruments": [{"strike": k[0], "type": k[1], "bars": insts[k]} for k in order],
+    }
+
+
+def _csv_chain_day(expiry, date):
+    folder = find_expiry_dir(expiry)
+    insts = []
+    for f in sorted(folder.glob("*.csv")):
+        m = FILE_RE.search(f.name)
+        if not m:
+            continue
+        df = read_csv(f)
+        d = df[df["__date"] == date]
+        if d.empty:
+            continue
+        bars = [
+            [int(u), float(o), float(h), float(lo), float(c), float(v), float(oi)]
+            for u, o, h, lo, c, v, oi in zip(
+                d["__unix"], d["Open"], d["High"], d["Low"], d["Close"], d["Volume"], d["Open Interest"]
+            )
+        ]
+        insts.append({"strike": int(m.group(1)), "type": m.group(2).upper(), "bars": bars})
+    return {"expiry": expiry, "date": date, "instruments": insts}
+
+
 def _db_search(needle, want_type, limit):
     if want_type:
         rows = _q(
@@ -477,6 +520,15 @@ def chart(expiry: str = Query(...), strike: int = Query(...), type: str = Query(
     ]
 
 
+@app.get("/api/chain_day")
+def chain_day(expiry: str = Query(...), date: str = Query(...)):
+    """Bulk replay feed: every strike's 1-min bars for one (expiry, date).
+    {expiry, date, instruments:[{strike, type, bars:[[unix,o,h,l,c,v,oi], ...]}]}."""
+    if USING_DB:
+        return _db_chain_day(expiry, date)
+    return _csv_chain_day(expiry, date)
+
+
 @app.get("/api/spot")
 def spot():
     """Full 1-min Nifty index (spot) history as columnar arrays {t,o,h,l,c,v}.
@@ -519,7 +571,7 @@ def api_info():
     return {
         "service": "Nifty Options Chain API",
         "data_dir": str(DATA_DIR),
-        "endpoints": ["/api/expiries", "/api/dates", "/api/times", "/api/chain", "/api/chart", "/api/spot", "/api/search"],
+        "endpoints": ["/api/expiries", "/api/dates", "/api/times", "/api/chain", "/api/chain_day", "/api/chart", "/api/spot", "/api/search"],
     }
 
 

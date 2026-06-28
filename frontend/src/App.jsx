@@ -5,6 +5,7 @@ import OptionChain from './components/OptionChain'
 import ChartPanel from './components/ChartPanel'
 import SearchBar from './components/SearchBar'
 import Login from './components/Login'
+import SimPage from './sim/ui/SimPage'
 import { authEnabled, supabase, signOut } from './supabase'
 
 const fmtDate = (iso) => {
@@ -38,9 +39,10 @@ export default function App() {
     if (!session) return <Login />
   }
 
-  // Standalone Nifty spot chart, opened in its own tab via ?view=spot.
+  // Standalone pages opened in their own tabs.
   const view = new URLSearchParams(window.location.search).get('view')
   if (view === 'spot') return <SpotPage userEmail={session?.user?.email} />
+  if (view === 'sim') return <SimPage userEmail={session?.user?.email} />
   return <Viewer userEmail={session?.user?.email} />
 }
 
@@ -200,6 +202,14 @@ function Viewer({ userEmail }) {
           className="flex items-center gap-1.5 rounded-md border border-emerald-700/60 bg-emerald-600/15 px-2.5 py-1 text-xs font-medium text-emerald-300 hover:bg-emerald-600/30"
         >
           <span className="text-sm leading-none">📈</span> Nifty Spot
+          <span className="text-[10px] opacity-70">↗</span>
+        </button>
+        <button
+          onClick={() => window.open(window.location.pathname + '?view=sim', '_blank', 'noopener')}
+          title="Open the historical replay simulator in a new tab"
+          className="flex items-center gap-1.5 rounded-md border border-violet-700/60 bg-violet-600/15 px-2.5 py-1 text-xs font-medium text-violet-300 hover:bg-violet-600/30"
+        >
+          <span className="text-sm leading-none">⏱</span> Replay Sim
           <span className="text-[10px] opacity-70">↗</span>
         </button>
         {!chainOpen && (
