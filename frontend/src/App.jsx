@@ -207,9 +207,17 @@ function Viewer({ userEmail }) {
         <button
           onClick={() => window.open(window.location.pathname + '?view=sim', '_blank', 'noopener')}
           title="Open the historical replay simulator in a new tab"
-          className="flex items-center gap-1.5 rounded-md border border-violet-700/60 bg-violet-600/15 px-2.5 py-1 text-xs font-medium text-violet-300 hover:bg-violet-600/30"
+          className="flex items-center gap-1.5 rounded-md border border-rose-700/60 bg-rose-600/15 px-2.5 py-1 text-xs font-medium text-rose-300 hover:bg-rose-600/30"
         >
           <span className="text-sm leading-none">⏱</span> Replay Sim
+          <span className="text-[10px] opacity-70">↗</span>
+        </button>
+        <button
+          onClick={() => window.open('/stratos', '_blank', 'noopener')}
+          title="Open StratosAI — backtest trading strategies in plain English (password protected)"
+          className="flex items-center gap-1.5 rounded-md border border-violet-700/60 bg-violet-600/15 px-2.5 py-1 text-xs font-medium text-violet-300 hover:bg-violet-600/30"
+        >
+          <span className="text-sm leading-none">🚀</span> Stratos
           <span className="text-[10px] opacity-70">↗</span>
         </button>
         {!chainOpen && (
