@@ -5,11 +5,17 @@ import { useEffect, useState } from 'react'
 import OptionChain from '../../components/OptionChain'
 import { authEnabled, getAccessToken, signOut } from '../../supabase'
 import { useSim } from './useSim.js'
+import { hhmm } from './fmt.js'
 import TransportBar from './TransportBar.jsx'
 import PositionsPanel from './PositionsPanel.jsx'
 import RiskPanel from './RiskPanel.jsx'
 import EquityCurve from './EquityCurve.jsx'
+import PayoffChart from './PayoffChart.jsx'
+import StrategyStats from './StrategyStats.jsx'
+import GreeksTable from './GreeksTable.jsx'
 import TradeTicket from './TradeTicket.jsx'
+
+const TABS = ['Payoff', 'MTM', 'Greeks', 'Risk']
 
 const API_BASE =
   import.meta.env.VITE_API_BASE !== undefined ? import.meta.env.VITE_API_BASE : import.meta.env.PROD ? '' : 'http://localhost:8000'
@@ -27,6 +33,7 @@ export default function SimPage({ userEmail }) {
 
   const sim = useSim({ base: API_BASE, token, ready })
   const [pick, setPick] = useState(null) // { strike, type } whose ticket is open
+  const [tab, setTab] = useState('Payoff')
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-ink text-slate-200">
@@ -96,23 +103,43 @@ export default function SimPage({ userEmail }) {
             </div>
           </section>
 
-          {/* RIGHT */}
+          {/* RIGHT — stats + tabbed analysis (payoff/MTM/greeks/risk) over the positions table */}
           <section className="flex min-h-0 flex-1 flex-col">
-            <div className="flex min-h-0 flex-1 flex-row border-b border-edge">
-              <div className="min-h-0 flex-1 border-r border-edge">
-                <PositionsPanel
-                  book={sim.book}
-                  onExitLeg={sim.squareOffLeg}
-                  onExitGroup={sim.squareOffGroup}
-                  onExitAll={sim.squareOffAll}
-                />
-              </div>
-              <div className="min-h-0 w-[300px] shrink-0">
-                <RiskPanel book={sim.book} limits={sim.limits} warnings={sim.warnings} breaches={sim.breaches} setLimits={sim.setLimits} />
-              </div>
+            <StrategyStats payoff={sim.payoff} book={sim.book} spot={sim.spot} />
+
+            <div className="flex items-center gap-1 border-b border-edge bg-panel2 px-2 py-1">
+              {TABS.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={`rounded px-2.5 py-1 text-xs font-medium ${tab === t ? 'bg-sky-600 text-white' : 'text-slate-400 hover:bg-edge hover:text-slate-200'}`}
+                >
+                  {t === 'MTM' ? 'MTM' : t}
+                  {t === 'Risk' && sim.breaches.some((b) => b.reason === 'risk_breach') && <span className="ml-1 text-red-300">●</span>}
+                </button>
+              ))}
             </div>
-            <div className="h-[40%] min-h-[180px]">
-              <EquityCurve curve={sim.curve} />
+
+            <div className="min-h-0 flex-1 overflow-hidden">
+              {tab === 'Payoff' && (
+                <PayoffChart payoff={sim.payoff} spot={sim.spot} expiryLabel={fmtDate(sim.expiry)} clockLabel={hhmm(sim.t)} />
+              )}
+              {tab === 'MTM' && <EquityCurve curve={sim.curve} />}
+              {tab === 'Greeks' && <GreeksTable book={sim.book} />}
+              {tab === 'Risk' && (
+                <RiskPanel book={sim.book} limits={sim.limits} warnings={sim.warnings} breaches={sim.breaches} setLimits={sim.setLimits} />
+              )}
+            </div>
+
+            <div className="h-[36%] min-h-[150px] border-t border-edge">
+              <PositionsPanel
+                book={sim.book}
+                multiplier={sim.multiplier}
+                setMultiplier={sim.setMultiplier}
+                onExitLeg={sim.squareOffLeg}
+                onExitAll={sim.squareOffAll}
+                onReset={sim.resetTrades}
+              />
             </div>
           </section>
         </main>

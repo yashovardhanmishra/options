@@ -17,6 +17,18 @@ export const dow = (u) => {
   if (u == null) return ''
   return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(u * 1000).getUTCDay()]
 }
+// "25 Jun 09:16" from a unix key.
+export const dateTimeShort = (u) => {
+  if (u == null) return '—'
+  const d = new Date(u * 1000)
+  return `${pad(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]} ${hhmm(u)}`
+}
+// "30 Jun'26" from an ISO expiry.
+export const expiryShort = (iso) => {
+  if (!iso) return '—'
+  const [y, m, d] = iso.split('-')
+  return `${d} ${MONTHS[+m - 1]}'${y.slice(2)}`
+}
 
 const inr0 = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 })
 const inr1 = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 1 })

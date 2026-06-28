@@ -20,6 +20,24 @@ import { runSession } from '../replay/runner.js'
 import { entry, exitLeg, exitGroup, exitPortfolio } from '../portfolio/actions.js'
 import { speedToBarsPerFrame } from '../replay/transport.js'
 import { checkLimits } from '../engine/risk.js'
+import { yearsToExpiry } from '../engine/time.js'
+import { impliedVol } from '../engine/iv.js'
+import { strategySummary } from '../engine/payoff.js'
+
+// ATM implied vol at the clock: invert the option closest to spot (CE, then PE). Falls back
+// to null so callers can substitute an average leg IV.
+function computeAtmIv(chainSnap, S, T, r = 0.065) {
+  if (!chainSnap?.chain || S == null || !(T > 0)) return null
+  let best = null
+  for (const row of chainSnap.chain) if (best == null || Math.abs(row.strike - S) < Math.abs(best.strike - S)) best = row
+  for (const type of ['CE', 'PE']) {
+    const px = type === 'CE' ? best?.ce?.ltp : best?.pe?.ltp
+    if (px == null) continue
+    const { sigma, degenerate } = impliedVol({ S, K: best.strike, T, r, price: px, type })
+    if (!degenerate && sigma > 0) return sigma
+  }
+  return null
+}
 
 const TICK_MS = 60 // play tick; speed = bars advanced per tick (render cadence only)
 
@@ -38,9 +56,10 @@ export function useSim({ base = '', token, ready = true } = {}) {
   const [userActions, setUserActions] = useState([])
   const [limits, setLimitsState] = useState({ portfolio: {}, groups: {} })
 
-  // ---- transport ----
+  // ---- transport + analysis ----
   const [speed, setSpeed] = useState('5x')
   const [playing, setPlaying] = useState(false)
+  const [multiplier, setMultiplier] = useState(1)
 
   const idRef = useRef(0) // leg-id counter
   const spotRef = useRef(null) // cached spot bars
@@ -113,6 +132,20 @@ export function useSim({ base = '', token, ready = true } = {}) {
     [book, limits],
   )
 
+  // ---- strategy payoff analytics (StockMock-style), recomputed at the clock ----
+  const Texp = useMemo(() => (loaded ? Math.max(0, yearsToExpiry(t, loaded.expiry)) : 0), [loaded, t])
+  const spot = chainSnap?.S ?? null
+  const atmIv = useMemo(() => computeAtmIv(chainSnap, spot, Texp), [chainSnap, spot, Texp])
+  const payoff = useMemo(() => {
+    if (!book || !book.openLegs.length || spot == null) return null
+    const fallback = atmIv || 0.15
+    const legs = book.openLegs.map((s) => ({
+      strike: s.leg.strike, type: s.leg.type, side: s.leg.side, lots: s.leg.lots,
+      lotSize: s.lotSize, entryPrice: s.leg.entryPrice, sigma: s.degenerate || !(s.iv > 0) ? fallback : s.iv,
+    }))
+    return strategySummary(legs, { S0: spot, Tnow: Texp, Texp, atmIv: fallback, mult: multiplier })
+  }, [book, spot, Texp, atmIv, multiplier])
+
   // ---- transport ----
   const seek = useCallback((i) => setClockIndex(() => Math.max(0, Math.min(len - 1, i | 0))), [len])
   const stepBy = useCallback((n) => setClockIndex((c) => Math.max(0, Math.min(len - 1, c + n))), [len])
@@ -168,6 +201,8 @@ export function useSim({ base = '', token, ready = true } = {}) {
     expiries, expiry, setExpiry, allDates, fromDate, setFromDate, loading, error,
     // engine outputs (read-only)
     loaded, timeline, len, clockIndex, t, book, chainSnap, curve, breaches, warnings, limits, userActions, fullRun,
+    // strategy analytics
+    spot, Texp, atmIv, payoff, multiplier, setMultiplier,
     // transport
     speed, setSpeed, playing, setPlaying, seek, stepBy,
     // emitters
