@@ -40,6 +40,10 @@ const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFra
 // indicator value: 2 decimals, but compact for big ones (OBV, A/D, PVT…)
 const fmtVal = (v) => (Math.abs(v) >= 100000 ? compact.format(v) : v.toFixed(2))
 
+// shared style for the replay transport buttons (step / play-pause)
+const replayBtn =
+  'rounded border border-edge bg-panel px-2 py-1 text-slate-200 hover:bg-edge hover:text-white'
+
 export default function ChartPanel({ selection, onClose, spot = false }) {
   const wrapRef = useRef(null)
   const chartRef = useRef(null)
@@ -49,6 +53,7 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
   const seriesRef = useRef([]) // latest computed series (read by paint())
   const indSeriesRef = useRef(new Map()) // indicator uid -> [lightweight-charts series]
   const uidRef = useRef(0)
+  const replayWinRef = useRef(150) // visible-bar window captured when replay starts
 
   const [raw, setRaw] = useState([])
   const [tf, setTf] = useState(spot ? '15m' : '5m')
@@ -63,6 +68,14 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
   const [patterns, setPatterns] = useState([]) // active pattern keys (markers on candles)
   const [patternCode, setPatternCode] = useState({}) // key -> edited Pine (overrides default detector)
   const [codeView, setCodeView] = useState(null) // open Pine modal descriptor
+
+  // ----- Bar replay (reveal bars one per second from a chosen date) -----
+  const [replayOpen, setReplayOpen] = useState(false) // control bar visible
+  const [replayOn, setReplayOn] = useState(false) // replay active (series sliced to cursor)
+  const [replayCount, setReplayCount] = useState(0) // # of bars revealed (cursor = count-1)
+  const [playing, setPlaying] = useState(false) // auto-advancing
+  const [replaySpeed, setReplaySpeed] = useState(1) // bars per second
+  const [replayDate, setReplayDate] = useState('') // chosen start date (YYYY-MM-DD)
 
   const addIndicator = (key) =>
     setIndicators((list) => [...list, { uid: ++uidRef.current, key, params: defaultParams(key) }])
@@ -162,13 +175,20 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
     return { min: raw[0].time, max: raw[raw.length - 1].time }
   }, [raw])
 
-  // ----- filtered + resampled series -----
-  const series = useMemo(() => {
+  // ----- filtered + resampled series (FULL — the complete view, pre-replay) -----
+  const fullSeries = useMemo(() => {
     const fromSec = dateStrToSec(from)
     const toSec = dateStrToSec(to, true)
     const windowed = filterByRange(raw, fromSec, toSec)
     return resample(windowed, tf)
   }, [raw, tf, from, to])
+  // During bar replay, reveal only the first `replayCount` bars (one more per tick) so
+  // candles + every indicator/pattern (all derived from this `series`) play forward together.
+  const series = useMemo(
+    () =>
+      replayOn ? fullSeries.slice(0, Math.max(1, Math.min(replayCount, fullSeries.length))) : fullSeries,
+    [fullSeries, replayOn, replayCount],
+  )
   seriesRef.current = series
 
   // Push the current series into the (already created) chart series.
@@ -202,6 +222,8 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
         textColor: '#8b9bb0',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         fontSize: 11,
+        // Hide the TradingView attribution logo from the chart surface.
+        attributionLogo: false,
       },
       grid: {
         vertLines: { color: 'rgba(40,54,74,0.35)' },
@@ -321,11 +343,68 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
   useEffect(() => {
     paint()
     setTip(null)
-    if (chartRef.current && series.length) {
-      chartRef.current.timeScale().fitContent()
+    const chart = chartRef.current
+    if (!chart || !series.length) return
+    if (replayOn) {
+      // Sliding window: keep the just-revealed bar near the right edge with the prior
+      // context visible, so bars appear one-by-one (instead of re-fitting all of them).
+      const W = replayWinRef.current || 150
+      try {
+        chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, series.length - W), to: series.length + 1 })
+      } catch {
+        chart.timeScale().fitContent()
+      }
+    } else {
+      chart.timeScale().fitContent()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [series])
+  }, [series, replayOn])
+
+  // ----- bar-replay auto-advance (reveal +1 bar every 1000/speed ms) -----
+  useEffect(() => {
+    if (!replayOn || !playing) return
+    if (replayCount >= fullSeries.length) {
+      setPlaying(false)
+      return
+    }
+    const ms = 1000 / Math.max(0.25, replaySpeed)
+    const id = setTimeout(() => setReplayCount((c) => Math.min(c + 1, fullSeries.length)), ms)
+    return () => clearTimeout(id)
+  }, [replayOn, playing, replayCount, replaySpeed, fullSeries.length])
+
+  // Leave replay whenever the underlying data changes (instrument / timeframe / date range).
+  useEffect(() => {
+    setReplayOn(false)
+    setPlaying(false)
+  }, [raw, tf, from, to])
+
+  const startReplay = () => {
+    const n = fullSeries.length
+    if (n < 2) return
+    // Default to ~40% in so there's history to the left; jump to the chosen date if given.
+    let start = Math.floor(n * 0.4)
+    if (replayDate) {
+      const sec = dateStrToSec(replayDate)
+      const idx = fullSeries.findIndex((c) => c.time >= sec)
+      if (idx >= 0) start = idx
+    }
+    start = Math.max(1, Math.min(start, n - 1))
+    // Preserve the user's current zoom as the replay window width.
+    try {
+      const r = chartRef.current?.timeScale().getVisibleLogicalRange()
+      replayWinRef.current = r ? Math.max(20, Math.round(r.to - r.from)) : 150
+    } catch {
+      replayWinRef.current = 150
+    }
+    setReplayOn(true)
+    setReplayCount(start)
+    setPlaying(true)
+  }
+  const exitReplay = () => {
+    setPlaying(false)
+    setReplayOn(false)
+  }
+  const stepReplay = (d) => setReplayCount((c) => Math.max(1, Math.min(c + d, fullSeries.length)))
 
   // ----- (re)build indicator series whenever indicators or the candle data change -----
   useEffect(() => {
@@ -521,6 +600,18 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
               Reset
             </button>
 
+            <button
+              onClick={() => setReplayOpen((v) => !v)}
+              title="Bar replay — reveal bars one per second from a chosen date"
+              className={`rounded-md border px-3 py-1 text-xs transition-colors ${
+                replayOpen || replayOn
+                  ? 'border-sky-600 bg-sky-600/20 text-sky-200'
+                  : 'border-edge bg-panel2 text-slate-300 hover:bg-edge hover:text-white'
+              }`}
+            >
+              ▶ Replay{replayOn ? ' · ON' : ''}
+            </button>
+
             <div className="ml-auto flex items-center gap-3">
               <span className="text-xs text-slate-500">
                 {series.length.toLocaleString()} bars
@@ -538,6 +629,62 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
           </>
         )}
       </div>
+
+      {/* Bar-replay control bar */}
+      {ready && replayOpen && (
+        <div className="flex flex-wrap items-center gap-3 border-b border-edge bg-panel2/60 px-4 py-2 text-xs">
+          {!replayOn ? (
+            <>
+              <span className="font-semibold text-sky-300">Bar Replay</span>
+              <div className="flex items-center gap-1.5 text-slate-400">
+                <span>Start date</span>
+                <input
+                  type="date"
+                  value={replayDate}
+                  min={span ? secToDateStr(span.min) : undefined}
+                  max={span ? secToDateStr(span.max) : undefined}
+                  onChange={(e) => setReplayDate(e.target.value)}
+                  className="rounded border border-edge bg-panel px-2 py-1 text-slate-200 outline-none focus:border-sky-600"
+                />
+              </div>
+              <SpeedPicker value={replaySpeed} onChange={setReplaySpeed} />
+              <button
+                onClick={startReplay}
+                className="rounded-md bg-sky-600 px-3 py-1 font-medium text-white hover:bg-sky-500"
+              >
+                ▶ Start ({tf})
+              </button>
+              <span className="text-slate-500">Reveals 1 bar/sec from the chosen date.</span>
+            </>
+          ) : (
+            <>
+              <span className="font-semibold text-sky-300">REPLAY</span>
+              <button onClick={() => stepReplay(-1)} title="Step back" className={replayBtn}>
+                ⏮
+              </button>
+              <button onClick={() => setPlaying((p) => !p)} className={replayBtn}>
+                {playing ? '⏸ Pause' : '▶ Play'}
+              </button>
+              <button onClick={() => stepReplay(1)} title="Step forward" className={replayBtn}>
+                ⏭
+              </button>
+              <SpeedPicker value={replaySpeed} onChange={setReplaySpeed} />
+              <span className="font-mono text-slate-400 tabular-nums">
+                bar {replayCount.toLocaleString()} / {fullSeries.length.toLocaleString()}
+                {series.length > 0
+                  ? ` · ${fmtDateUTC(series[series.length - 1].time)} ${fmtTimeUTC(series[series.length - 1].time)}`
+                  : ''}
+              </span>
+              <button
+                onClick={exitReplay}
+                className="ml-auto rounded-md border border-edge px-3 py-1 text-slate-300 hover:bg-edge hover:text-white"
+              >
+                ✕ Exit
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Chart area — container is ALWAYS mounted so the chart can be created up front */}
       <div className="relative min-h-0 flex-1">
@@ -733,6 +880,25 @@ function Row({ label, value, cls = 'text-slate-200' }) {
     <div className="flex justify-between font-mono tabular-nums">
       <span className="text-slate-500">{label}</span>
       <span className={cls}>{value}</span>
+    </div>
+  )
+}
+
+const REPLAY_SPEEDS = [0.5, 1, 2, 4, 10]
+function SpeedPicker({ value, onChange }) {
+  return (
+    <div className="flex overflow-hidden rounded-md border border-edge" title="Replay speed (bars per second)">
+      {REPLAY_SPEEDS.map((s) => (
+        <button
+          key={s}
+          onClick={() => onChange(s)}
+          className={`px-2 py-1 text-xs ${
+            value === s ? 'bg-sky-600 text-white' : 'bg-panel2 text-slate-400 hover:bg-edge hover:text-slate-200'
+          }`}
+        >
+          {s}×
+        </button>
+      ))}
     </div>
   )
 }
