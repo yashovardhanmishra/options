@@ -7,6 +7,7 @@ import { authEnabled, getAccessToken, signOut } from '../../supabase'
 import { useSim } from './useSim.js'
 import { hhmm } from './fmt.js'
 import TransportBar from './TransportBar.jsx'
+import TimeBar from './TimeBar.jsx'
 import PositionsPanel from './PositionsPanel.jsx'
 import RiskPanel from './RiskPanel.jsx'
 import EquityCurve from './EquityCurve.jsx'
@@ -83,6 +84,7 @@ export default function SimPage({ userEmail }) {
       </header>
 
       <TransportBar sim={sim} />
+      {sim.loaded && !sim.loading && <TimeBar sim={sim} />}
 
       {sim.error && <div className="bg-red-600/15 px-4 py-1 text-xs text-red-300">Load error: {sim.error}</div>}
 

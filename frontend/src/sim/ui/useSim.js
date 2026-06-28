@@ -19,6 +19,7 @@ import { portfolioAt } from '../portfolio/book.js'
 import { runSession } from '../replay/runner.js'
 import { entry, exitLeg, exitGroup, exitPortfolio } from '../portfolio/actions.js'
 import { speedToBarsPerFrame } from '../replay/transport.js'
+import * as TL from '../replay/timeline.js'
 import { checkLimits } from '../engine/risk.js'
 import { yearsToExpiry } from '../engine/time.js'
 import { impliedVol } from '../engine/iv.js'
@@ -150,6 +151,30 @@ export function useSim({ base = '', token, ready = true } = {}) {
   const seek = useCallback((i) => setClockIndex(() => Math.max(0, Math.min(len - 1, i | 0))), [len])
   const stepBy = useCallback((n) => setClockIndex((c) => Math.max(0, Math.min(len - 1, c + n))), [len])
 
+  // ---- time navigation (StockMock-style): jump to a date+time, step ±minutes (clamped to
+  //      the trading day), SOD/EOD, prev/next day ----
+  const sessionDates = useMemo(() => timeline?.sessions.map((s) => s.date) ?? [], [timeline])
+  const ci = Math.min(clockIndex, Math.max(0, len - 1))
+  const currentSession = useMemo(() => (timeline && len ? TL.sessionOf(timeline, ci) : null), [timeline, ci, len])
+  const seekToDateTime = useCallback((date, hh, mm) => { if (timeline) seek(TL.indexOfDateTime(timeline, date, hh, mm)) }, [timeline, seek])
+  const stepMinutes = useCallback((n) => {
+    if (!timeline || !len) return
+    const s = TL.sessionOf(timeline, ci)
+    const target = timeline.times[ci] + n * 60
+    let idx
+    if (n >= 0) { idx = TL.indexAtOrAfter(timeline, target); if (idx >= len || idx > s.endIndex) idx = s.endIndex }
+    else { idx = TL.indexAtOrBefore(timeline, target); if (idx < s.startIndex) idx = s.startIndex }
+    seek(idx)
+  }, [timeline, ci, len, seek])
+  const toSOD = useCallback(() => currentSession && seek(currentSession.startIndex), [currentSession, seek])
+  const toEOD = useCallback(() => currentSession && seek(currentSession.endIndex), [currentSession, seek])
+  const dayStep = useCallback((dir) => {
+    if (!timeline || !len) return
+    const ss = timeline.sessions
+    const i = ss.findIndex((s) => ci >= s.startIndex && ci <= s.endIndex)
+    seek(ss[Math.max(0, Math.min(ss.length - 1, (i < 0 ? 0 : i) + dir))].startIndex)
+  }, [timeline, ci, len, seek])
+
   // play loop: advance `barsPerFrame` per tick; render only the landed bar (every
   // intervening bar was already evaluated in fullRun, so nothing is skipped).
   useEffect(() => {
@@ -203,8 +228,9 @@ export function useSim({ base = '', token, ready = true } = {}) {
     loaded, timeline, len, clockIndex, t, book, chainSnap, curve, breaches, warnings, limits, userActions, fullRun,
     // strategy analytics
     spot, Texp, atmIv, payoff, multiplier, setMultiplier,
-    // transport
+    // transport + time navigation
     speed, setSpeed, playing, setPlaying, seek, stepBy,
+    sessionDates, currentSession, seekToDateTime, stepMinutes, toSOD, toEOD, dayStep,
     // emitters
     placeEntry, squareOffLeg, squareOffGroup, squareOffAll, resetTrades, setLimits,
   }
