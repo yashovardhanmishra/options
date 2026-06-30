@@ -54,6 +54,8 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
   const indSeriesRef = useRef(new Map()) // indicator uid -> [lightweight-charts series]
   const uidRef = useRef(0)
   const replayWinRef = useRef(150) // visible-bar window captured when replay starts
+  const prevLenRef = useRef(0) // bar count last painted (to detect forward ticks / follow)
+  const prevReplayOnRef = useRef(false)
 
   const [raw, setRaw] = useState([])
   const [tf, setTf] = useState(spot ? '15m' : '5m')
@@ -337,26 +339,43 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ----- repaint + fit whenever the computed series changes -----
-  // (series only changes on instrument load / timeframe / date-range — all cases
-  // where re-fitting is wanted. Manual pan/zoom doesn't change it, so zoom sticks.)
+  // ----- repaint whenever the computed series changes -----
+  // Non-replay changes (instrument / timeframe / date-range) re-fit. During replay we must
+  // NOT re-fit or force a fixed window every tick — that throws away the user's zoom/pan.
+  // setData() preserves the current visible logical range, so we only AUTO-FOLLOW the new
+  // bar when the user is already at the right edge (TradingView-style); if they've zoomed or
+  // panned back, we leave their view exactly where it is.
   useEffect(() => {
-    paint()
-    setTip(null)
     const chart = chartRef.current
-    if (!chart || !series.length) return
-    if (replayOn) {
-      // Sliding window: keep the just-revealed bar near the right edge with the prior
-      // context visible, so bars appear one-by-one (instead of re-fitting all of them).
-      const W = replayWinRef.current || 150
-      try {
-        chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, series.length - W), to: series.length + 1 })
-      } catch {
-        chart.timeScale().fitContent()
+    // Read the pre-repaint view (still showing the OLD data) to decide whether to follow.
+    const justStarted = replayOn && !prevReplayOnRef.current
+    let following = true
+    let width = replayWinRef.current || 150
+    if (chart && replayOn && !justStarted && prevLenRef.current > 0) {
+      const r = chart.timeScale().getVisibleLogicalRange()
+      if (r) {
+        width = Math.max(20, Math.round(r.to - r.from)) // keep the user's zoom width
+        following = r.to >= prevLenRef.current - 2 // right edge at/near the last revealed bar
       }
-    } else {
-      chart.timeScale().fitContent()
     }
+
+    paint() // setData(new slice) — preserves the visible logical range
+    setTip(null)
+
+    if (chart && series.length) {
+      const follow = () => {
+        try {
+          chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, series.length - width), to: series.length + 1 })
+        } catch {
+          chart.timeScale().fitContent()
+        }
+      }
+      if (!replayOn) chart.timeScale().fitContent()
+      else if (justStarted || following) follow()
+      // replay tick + user scrolled/zoomed away -> do nothing; their view is preserved.
+    }
+    prevLenRef.current = series.length
+    prevReplayOnRef.current = replayOn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [series, replayOn])
 
