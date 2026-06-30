@@ -355,29 +355,38 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
     const chart = chartRef.current
     // Read the pre-repaint view (still showing the OLD data) to decide whether to follow.
     const justStarted = replayOn && !prevReplayOnRef.current
-    let following = true
-    let width = replayWinRef.current || 150
+    let r0 = null
+    let following = false
     if (chart && replayOn && !justStarted && prevLenRef.current > 0) {
-      const r = chart.timeScale().getVisibleLogicalRange()
-      if (r) {
-        width = Math.max(20, Math.round(r.to - r.from)) // keep the user's zoom width
-        following = r.to >= prevLenRef.current - 2 // right edge at/near the last revealed bar
-      }
+      r0 = chart.timeScale().getVisibleLogicalRange()
+      if (r0) following = r0.to >= prevLenRef.current - 2 // right edge at/near the last revealed bar
     }
 
     paint() // setData(new slice) — preserves the visible logical range
     setTip(null)
 
     if (chart && series.length) {
-      const follow = () => {
+      if (!replayOn) {
+        chart.timeScale().fitContent()
+      } else if (justStarted) {
+        // position the initial replay window (keep the user's pre-replay zoom width)
+        const W = replayWinRef.current || 150
         try {
-          chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, series.length - width), to: series.length + 1 })
+          chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, series.length - W), to: series.length + 1 })
         } catch {
           chart.timeScale().fitContent()
         }
+      } else if (following && r0) {
+        // SHIFT the existing view right by the number of new bars — preserves the EXACT
+        // zoom width AND position, just follows the new bar(s). No re-fit, no growth, so
+        // pausing then resuming continues from the exact same view.
+        const delta = series.length - prevLenRef.current
+        if (delta !== 0) {
+          try {
+            chart.timeScale().setVisibleLogicalRange({ from: r0.from + delta, to: r0.to + delta })
+          } catch {}
+        }
       }
-      if (!replayOn) chart.timeScale().fitContent()
-      else if (justStarted || following) follow()
       // replay tick + user scrolled/zoomed away -> do nothing; their view is preserved.
     }
     prevLenRef.current = series.length
