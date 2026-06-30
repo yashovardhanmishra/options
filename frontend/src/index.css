@@ -1,6 +1,129 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display&family=Barlow:wght@400;500;600;700;800&family=Bebas+Neue&family=Shippori+Mincho:wght@400;500;600;700;800&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ============================================================================
+   TEMPLATE THEMES (shared with StratosAI — same `data-theme` + localStorage key)
+   The Tailwind palette (ink/panel/panel2/edge/ce/pe) is var-driven, so flipping
+   `data-theme` on <html> re-skins the whole option-chain terminal. Defaults
+   below are the original dark terminal ("cosmic"); each `[data-theme]` block
+   overrides them. See src/theme.js for the registry.
+   ============================================================================ */
+:root {
+  --opt-ink: #0a0e14;
+  --opt-canvas: #0a0e14;
+  --opt-panel: #0f1620;
+  --opt-panel2: #131c28;
+  --opt-edge: #1e2a3a;
+  --opt-ce: #1b3a5c;
+  --opt-pe: #5c2b1b;
+
+  --opt-text: #c7d2dc;
+  --opt-muted: #94a3b8;
+  --opt-faint: #64748b;
+  --opt-accent: #38bdf8;
+  --opt-call: #38bdf8;
+  --opt-put: #fb923c;
+  --opt-pos: #22c55e;
+  --opt-neg: #f87171;
+  --opt-warn: #fbbf24;
+
+  --opt-font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --opt-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --opt-scroll-track: #0a0e14;
+  --opt-scroll-thumb: #243244;
+  --opt-scroll-thumb-hover: #324560;
+}
+
+/* 03 · Neumorphic Soft */
+:root[data-theme="neumorphic"] {
+  --opt-ink: #eceef2; --opt-canvas: #eceef2;
+  --opt-panel: #e9ecf1; --opt-panel2: #e3e7ee; --opt-edge: rgba(45, 55, 72, 0.1);
+  --opt-ce: #dfe6f0; --opt-pe: #f0e6df;
+  --opt-text: #2d3748; --opt-muted: #64748b; --opt-faint: #94a3b8;
+  --opt-accent: #4f46e5; --opt-call: #4f46e5; --opt-put: #c2410c;
+  --opt-pos: #059669; --opt-neg: #e11d48; --opt-warn: #d97706;
+  --opt-font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --opt-scroll-track: #e3e7ee; --opt-scroll-thumb: #cdd2da; --opt-scroll-thumb-hover: #b9bfca;
+}
+
+/* 07 · Bento Modular (dark) */
+:root[data-theme="bento"] {
+  --opt-ink: #0f172a; --opt-canvas: radial-gradient(120% 80% at 0% 0%, rgba(59,130,246,0.12), transparent 50%), radial-gradient(120% 80% at 100% 0%, rgba(139,92,246,0.12), transparent 50%), #0f172a;
+  --opt-panel: #1a2436; --opt-panel2: #222e44; --opt-edge: rgba(255, 255, 255, 0.1);
+  --opt-ce: #1e3a5f; --opt-pe: #5f2f1e;
+  --opt-text: #ffffff; --opt-muted: rgba(255, 255, 255, 0.62); --opt-faint: rgba(255, 255, 255, 0.45);
+  --opt-accent: #3b82f6; --opt-call: #60a5fa; --opt-put: #fb923c;
+  --opt-pos: #34d399; --opt-neg: #fb7185; --opt-warn: #fbbf24;
+  --opt-font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --opt-scroll-track: #0f172a; --opt-scroll-thumb: #2c3a54; --opt-scroll-thumb-hover: #374662;
+}
+
+/* 08 · Swiss Grid */
+:root[data-theme="swiss"] {
+  --opt-ink: #ffffff; --opt-canvas: #ffffff;
+  --opt-panel: #ffffff; --opt-panel2: #f5f5f4; --opt-edge: rgba(0, 0, 0, 0.2);
+  --opt-ce: #f0f4f8; --opt-pe: #f8f0ec;
+  --opt-text: #000000; --opt-muted: #57534e; --opt-faint: #78716c;
+  --opt-accent: #e30613; --opt-call: #0b63b8; --opt-put: #c2410c;
+  --opt-pos: #047857; --opt-neg: #e30613; --opt-warn: #b45309;
+  --opt-font-sans: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  --opt-scroll-track: #ffffff; --opt-scroll-thumb: #d6d3d1; --opt-scroll-thumb-hover: #a8a29e;
+}
+
+/* 09 · Liquid Glass */
+:root[data-theme="glass"] {
+  --opt-ink: #e6ecfb;
+  --opt-canvas: radial-gradient(42% 42% at 18% 22%, rgba(125,211,252,0.5), transparent 70%), radial-gradient(42% 42% at 82% 78%, rgba(249,168,168,0.45), transparent 70%), linear-gradient(135deg, #dbeafe 0%, #fce7f3 50%, #e0e7ff 100%);
+  --opt-panel: rgba(255, 255, 255, 0.55); --opt-panel2: rgba(255, 255, 255, 0.42); --opt-edge: rgba(255, 255, 255, 0.6);
+  --opt-ce: rgba(186, 230, 253, 0.5); --opt-pe: rgba(254, 215, 170, 0.5);
+  --opt-text: #0f172a; --opt-muted: #475569; --opt-faint: #64748b;
+  --opt-accent: #0ea5e9; --opt-call: #0369a1; --opt-put: #c2410c;
+  --opt-pos: #059669; --opt-neg: #e11d48; --opt-warn: #d97706;
+  --opt-font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --opt-scroll-track: transparent; --opt-scroll-thumb: rgba(255, 255, 255, 0.8); --opt-scroll-thumb-hover: rgba(255, 255, 255, 0.95);
+}
+
+/* 14 · Gradient Mesh */
+:root[data-theme="mesh"] {
+  --opt-ink: #ffffff;
+  --opt-canvas: radial-gradient(circle at 15% 8%, rgba(251,191,36,0.5), transparent 38%), radial-gradient(circle at 85% 14%, rgba(236,72,153,0.45), transparent 40%), radial-gradient(circle at 50% -5%, rgba(129,140,248,0.4), transparent 45%), #ffffff;
+  --opt-panel: rgba(255, 255, 255, 0.85); --opt-panel2: #f8fafc; --opt-edge: rgba(15, 23, 42, 0.1);
+  --opt-ce: #eef2ff; --opt-pe: #fdf2f8;
+  --opt-text: #0f172a; --opt-muted: #475569; --opt-faint: #64748b;
+  --opt-accent: #7c3aed; --opt-call: #6d28d9; --opt-put: #db2777;
+  --opt-pos: #059669; --opt-neg: #e11d48; --opt-warn: #d97706;
+  --opt-font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --opt-scroll-track: transparent; --opt-scroll-thumb: rgba(15, 23, 42, 0.18); --opt-scroll-thumb-hover: rgba(15, 23, 42, 0.32);
+}
+
+/* 15 · Y2K Vapor Chrome */
+:root[data-theme="y2k"] {
+  --opt-ink: #dcd6fb;
+  --opt-canvas: radial-gradient(circle at 20% 20%, rgba(255,255,255,0.7), transparent 30%), radial-gradient(circle at 80% 30%, rgba(216,180,254,0.7), transparent 42%), radial-gradient(circle at 50% 85%, rgba(103,232,249,0.6), transparent 44%), linear-gradient(135deg, #c4b5fd 0%, #a5f3fc 50%, #fce7f3 100%);
+  --opt-panel: rgba(255, 255, 255, 0.6); --opt-panel2: rgba(255, 255, 255, 0.5); --opt-edge: rgba(255, 255, 255, 0.65);
+  --opt-ce: rgba(196, 181, 253, 0.45); --opt-pe: rgba(252, 231, 243, 0.5);
+  --opt-text: #1e1b4b; --opt-muted: #5b4d8f; --opt-faint: #6b5e9c;
+  --opt-accent: #ec4899; --opt-call: #7c3aed; --opt-put: #db2777;
+  --opt-pos: #047857; --opt-neg: #e11d48; --opt-warn: #d97706;
+  --opt-font-sans: "Barlow", ui-sans-serif, system-ui, sans-serif;
+  --opt-scroll-track: transparent; --opt-scroll-thumb: rgba(167, 139, 250, 0.5); --opt-scroll-thumb-hover: rgba(167, 139, 250, 0.7);
+}
+
+/* 16 · Japanese Minimal */
+:root[data-theme="japanese"] {
+  --opt-ink: #faf9f6; --opt-canvas: #faf9f6;
+  --opt-panel: #ffffff; --opt-panel2: #f4f2ed; --opt-edge: rgba(0, 0, 0, 0.1);
+  --opt-ce: #f4f6f8; --opt-pe: #f8f3f1;
+  --opt-text: #1a1a1a; --opt-muted: #78716c; --opt-faint: #a8a29e;
+  --opt-accent: #c8102e; --opt-call: #1f6f8b; --opt-put: #c2410c;
+  --opt-pos: #15803d; --opt-neg: #c8102e; --opt-warn: #b45309;
+  --opt-font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --opt-scroll-track: #f4f2ed; --opt-scroll-thumb: #ddd9d0; --opt-scroll-thumb-hover: #c9c4b8;
+}
 
 html,
 body,
@@ -10,30 +133,288 @@ body,
 
 body {
   margin: 0;
-  background: #0a0e14;
-  color: #c7d2dc;
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  background: var(--opt-canvas);
+  background-attachment: fixed;
+  color: var(--opt-text);
+  font-family: var(--opt-font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
-/* Thin dark scrollbars to match the terminal feel */
+/* Gradient-canvas themes: the full-height root uses `bg-ink` (background-color,
+   which can't hold a gradient) — paint the canvas via the `background` shorthand
+   so the gradient shows behind the translucent panels. */
+:root[data-theme="bento"] .bg-ink,
+:root[data-theme="glass"] .bg-ink,
+:root[data-theme="mesh"] .bg-ink,
+:root[data-theme="y2k"] .bg-ink {
+  background: var(--opt-canvas);
+}
+
+/* Frosted panels for the glassy themes. */
+:root[data-theme="glass"] .bg-panel,
+:root[data-theme="glass"] .bg-panel2,
+:root[data-theme="y2k"] .bg-panel,
+:root[data-theme="y2k"] .bg-panel2 {
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+
+/* Thin scrollbars track the theme. */
 ::-webkit-scrollbar {
   width: 9px;
   height: 9px;
 }
 ::-webkit-scrollbar-track {
-  background: #0a0e14;
+  background: var(--opt-scroll-track);
 }
 ::-webkit-scrollbar-thumb {
-  background: #243244;
+  background: var(--opt-scroll-thumb);
   border-radius: 6px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #324560;
+  background: var(--opt-scroll-thumb-hover);
 }
 
-/* date / native inputs adopt the dark scheme */
+/* date / native inputs adopt the dark scheme (overridden for light themes). */
 input[type='date'],
 select {
   color-scheme: dark;
+}
+
+/* ============================================================================
+   LIGHT-THEME COMPAT BRIDGE
+   The app is styled with hardcoded Tailwind utilities (text-slate-*, sky/orange
+   accents) that assume a dark canvas. Under the LIGHT templates these would be
+   near-invisible, so remap the readability-critical ones onto theme tokens.
+   (cosmic + bento stay dark and need no bridge.)
+   ============================================================================ */
+/* --- primary / body text (bright slate → dark foreground) --- */
+:root[data-mode="light"] .text-slate-100,
+:root[data-mode="light"] .text-slate-200,
+:root[data-mode="light"] .text-slate-300 {
+  color: var(--opt-text) !important;
+}
+:root[data-mode="light"] .text-slate-400 {
+  color: var(--opt-muted) !important;
+}
+:root[data-mode="light"] .text-slate-500,
+:root[data-mode="light"] .text-slate-600 {
+  color: var(--opt-faint) !important;
+}
+/* hover-to-white (paired with hover:bg-edge on a now-light surface) */
+:root[data-mode="light"] .hover\:text-white:hover,
+:root[data-mode="light"] .hover\:text-slate-200:hover {
+  color: var(--opt-text) !important;
+}
+
+/* --- accent text (light shades unreadable on light canvas → themed/darker) --- */
+:root[data-mode="light"] .text-sky-100,
+:root[data-mode="light"] .text-sky-200,
+:root[data-mode="light"] .text-sky-300,
+:root[data-mode="light"] .text-sky-400 {
+  color: var(--opt-call) !important;
+}
+:root[data-mode="light"] .text-violet-300 {
+  color: var(--opt-accent) !important;
+}
+:root[data-mode="light"] .text-emerald-300,
+:root[data-mode="light"] .text-emerald-400,
+:root[data-mode="light"] .text-green-400 {
+  color: var(--opt-pos) !important;
+}
+:root[data-mode="light"] .text-red-200,
+:root[data-mode="light"] .text-red-300,
+:root[data-mode="light"] .text-red-400,
+:root[data-mode="light"] .text-rose-300 {
+  color: var(--opt-neg) !important;
+}
+:root[data-mode="light"] .text-orange-200,
+:root[data-mode="light"] .text-orange-300,
+:root[data-mode="light"] .text-orange-400 {
+  color: var(--opt-put) !important;
+}
+:root[data-mode="light"] .text-amber-300,
+:root[data-mode="light"] .text-amber-400,
+:root[data-mode="light"] .text-yellow-400 {
+  color: var(--opt-warn) !important;
+}
+
+/* native controls follow the light scheme */
+:root[data-mode="light"] input[type='date'],
+:root[data-mode="light"] select {
+  color-scheme: light;
+}
+
+/* ============================================================================
+   PER-TEMPLATE CHARACTER — display fonts, corner radius, and surface elevation.
+   Gives each theme the depth/typography of its StratosAI counterpart instead of
+   a flat recolored terminal. cosmic + bento stay flat-dark and are untouched.
+   ============================================================================ */
+
+/* ── Display font for the app titles (NIFTY OPTIONS / REPLAY SIM / NIFTY SPOT) ── */
+:root {
+  --opt-font-display: var(--opt-font-sans);
+}
+:root[data-theme="mesh"] {
+  --opt-font-display: "DM Serif Display", ui-serif, Georgia, serif;
+}
+:root[data-theme="japanese"] {
+  --opt-font-display: "Shippori Mincho", ui-serif, Georgia, serif;
+}
+:root[data-theme="y2k"] {
+  --opt-font-display: "Bebas Neue", "Barlow", sans-serif;
+}
+h1 {
+  font-family: var(--opt-font-display);
+}
+:root[data-theme="y2k"] h1 {
+  letter-spacing: 0.06em;
+  font-weight: 500;
+}
+:root[data-theme="mesh"] h1,
+:root[data-theme="japanese"] h1 {
+  letter-spacing: 0;
+}
+
+/* ── Corner radius takes the template's character (controls + cards) ── */
+:root[data-theme="swiss"] :is(.rounded, .rounded-sm, .rounded-md, .rounded-lg, .rounded-xl) {
+  border-radius: 0 !important;
+}
+:root[data-theme="y2k"] .rounded {
+  border-radius: 0.5rem !important;
+}
+:root[data-theme="y2k"] .rounded-md {
+  border-radius: 0.7rem !important;
+}
+:root[data-theme="y2k"] .rounded-lg {
+  border-radius: 0.9rem !important;
+}
+:root[data-theme="neumorphic"] .rounded-md {
+  border-radius: 0.7rem !important;
+}
+:root[data-theme="neumorphic"] .rounded-lg {
+  border-radius: 0.9rem !important;
+}
+:root[data-theme="glass"] .rounded-md {
+  border-radius: 0.65rem !important;
+}
+:root[data-theme="japanese"] :is(.rounded, .rounded-md, .rounded-lg) {
+  border-radius: 2px !important;
+}
+
+/* ── Surface elevation so cards/controls lift off a LIGHT canvas (light mode only) ── */
+:root[data-mode="light"]:is([data-theme="glass"], [data-theme="mesh"], [data-theme="y2k"], [data-theme="japanese"]) .bg-panel2 {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 10px 26px -20px rgba(15, 23, 42, 0.3);
+}
+/* Neumorphic: its signature soft extruded shadow — light + dark forms. */
+:root[data-theme="neumorphic"][data-mode="light"] .bg-panel2 {
+  box-shadow: 4px 4px 10px #d6dae1, -4px -4px 10px #ffffff;
+  border-color: transparent !important;
+}
+:root[data-theme="neumorphic"][data-mode="dark"] .bg-panel2 {
+  box-shadow: 4px 4px 10px #1d1f24, -4px -4px 10px #31353e;
+  border-color: transparent !important;
+}
+/* Swiss: crisp solid-black hairlines in LIGHT mode (dark mode uses the white --opt-edge). */
+:root[data-theme="swiss"][data-mode="light"] .border-edge {
+  border-color: #000000 !important;
+}
+
+/* ── Option chain / replay use the active THEME font (Outfit, Inter Tight,
+   DM Sans, Barlow, …) instead of a constant mono — matching StratosAI. Tabular
+   figures keep the numeric columns aligned. The Pine code editor opts back into
+   real monospace via an explicit family (see CodeModal / .code-mono). ── */
+.font-mono {
+  font-family: var(--opt-font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.code-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, "JetBrains Mono", monospace !important;
+}
+
+/* ============================================================================
+   OPPOSITE-MODE VARIANTS — every template has a light AND a dark form. The base
+   block above is the natural mode; these `[data-mode]` blocks override the
+   mode-dependent --opt-* tokens (canvas/surfaces/text), keeping the theme font.
+   Driven by the global Light/Dark toggle (data-mode on <html>).
+   ============================================================================ */
+
+/* cosmic → LIGHT */
+:root[data-theme="cosmic"][data-mode="light"] {
+  --opt-ink: #f6f8fc; --opt-canvas: #f6f8fc; --opt-panel: #ffffff; --opt-panel2: #f1f5f9; --opt-edge: rgba(15, 23, 42, 0.1);
+  --opt-ce: #eef4ff; --opt-pe: #fef2f2;
+  --opt-text: #0f172a; --opt-muted: #475569; --opt-faint: #64748b;
+  --opt-accent: #4f46e5; --opt-call: #0369a1; --opt-put: #c2410c; --opt-pos: #059669; --opt-neg: #e11d48; --opt-warn: #d97706;
+  --opt-scroll-track: #eef2f7; --opt-scroll-thumb: #cbd5e1; --opt-scroll-thumb-hover: #94a3b8;
+}
+
+/* bento → LIGHT */
+:root[data-theme="bento"][data-mode="light"] {
+  --opt-ink: #f1f5f9;
+  --opt-canvas: radial-gradient(120% 80% at 0% 0%, rgba(59,130,246,0.1), transparent 50%), radial-gradient(120% 80% at 100% 0%, rgba(139,92,246,0.1), transparent 50%), #f1f5f9;
+  --opt-panel: #ffffff; --opt-panel2: #f8fafc; --opt-edge: rgba(15, 23, 42, 0.1);
+  --opt-ce: #eef4ff; --opt-pe: #fff1ed;
+  --opt-text: #0f172a; --opt-muted: #475569; --opt-faint: #64748b;
+  --opt-accent: #2563eb; --opt-call: #2563eb; --opt-put: #c2410c; --opt-pos: #059669; --opt-neg: #e11d48; --opt-warn: #d97706;
+  --opt-scroll-track: #eef2f7; --opt-scroll-thumb: #cbd5e1; --opt-scroll-thumb-hover: #94a3b8;
+}
+
+/* neumorphic → DARK */
+:root[data-theme="neumorphic"][data-mode="dark"] {
+  --opt-ink: #272a31; --opt-canvas: #272a31; --opt-panel: #2d3038; --opt-panel2: #33373f; --opt-edge: rgba(255, 255, 255, 0.05);
+  --opt-ce: #283042; --opt-pe: #3a2f28;
+  --opt-text: #e2e5ea; --opt-muted: #9aa1ad; --opt-faint: #7e8693;
+  --opt-accent: #a5b4fc; --opt-call: #a5b4fc; --opt-put: #fb923c; --opt-pos: #34d399; --opt-neg: #fb7185; --opt-warn: #fbbf24;
+  --opt-scroll-track: #272a31; --opt-scroll-thumb: #3b3f48; --opt-scroll-thumb-hover: #4a4f5a;
+}
+
+/* swiss → DARK */
+:root[data-theme="swiss"][data-mode="dark"] {
+  --opt-ink: #0a0a0a; --opt-canvas: #0a0a0a; --opt-panel: #0a0a0a; --opt-panel2: #161616; --opt-edge: rgba(255, 255, 255, 0.25);
+  --opt-ce: #0e1822; --opt-pe: #1f140e;
+  --opt-text: #ffffff; --opt-muted: #a3a3a3; --opt-faint: #8a8a8a;
+  --opt-accent: #e30613; --opt-call: #60a5fa; --opt-put: #fb923c; --opt-pos: #34d399; --opt-neg: #ff4d4d; --opt-warn: #fbbf24;
+  --opt-scroll-track: #0a0a0a; --opt-scroll-thumb: #2e2e2e; --opt-scroll-thumb-hover: #3f3f3f;
+}
+
+/* glass → DARK */
+:root[data-theme="glass"][data-mode="dark"] {
+  --opt-ink: #0b1220;
+  --opt-canvas: radial-gradient(42% 42% at 18% 22%, rgba(14,165,233,0.25), transparent 70%), radial-gradient(42% 42% at 82% 78%, rgba(236,72,153,0.2), transparent 70%), linear-gradient(135deg, #0b1220 0%, #1a1430 50%, #0b1730 100%);
+  --opt-panel: rgba(255, 255, 255, 0.08); --opt-panel2: rgba(255, 255, 255, 0.05); --opt-edge: rgba(255, 255, 255, 0.12);
+  --opt-ce: rgba(56, 189, 248, 0.12); --opt-pe: rgba(251, 146, 60, 0.12);
+  --opt-text: #e8eef7; --opt-muted: #9fb0c8; --opt-faint: #7e8ea6;
+  --opt-accent: #0ea5e9; --opt-call: #7dd3fc; --opt-put: #fb923c; --opt-pos: #34d399; --opt-neg: #fb7185; --opt-warn: #fbbf24;
+  --opt-scroll-track: transparent; --opt-scroll-thumb: rgba(255, 255, 255, 0.18); --opt-scroll-thumb-hover: rgba(255, 255, 255, 0.3);
+}
+
+/* mesh → DARK */
+:root[data-theme="mesh"][data-mode="dark"] {
+  --opt-ink: #0e0a1a;
+  --opt-canvas: radial-gradient(circle at 15% 8%, rgba(251,191,36,0.18), transparent 38%), radial-gradient(circle at 85% 14%, rgba(236,72,153,0.22), transparent 40%), radial-gradient(circle at 50% -5%, rgba(129,140,248,0.22), transparent 45%), #0e0a1a;
+  --opt-panel: #181225; --opt-panel2: #1f1730; --opt-edge: rgba(255, 255, 255, 0.1);
+  --opt-ce: #211a3a; --opt-pe: #2e1828;
+  --opt-text: #f1eefb; --opt-muted: #b3a8cc; --opt-faint: #8d82a8;
+  --opt-accent: #f472b6; --opt-call: #c4b5fd; --opt-put: #fb923c; --opt-pos: #34d399; --opt-neg: #fb7185; --opt-warn: #fbbf24;
+  --opt-scroll-track: transparent; --opt-scroll-thumb: rgba(255, 255, 255, 0.16); --opt-scroll-thumb-hover: rgba(255, 255, 255, 0.28);
+}
+
+/* y2k → DARK */
+:root[data-theme="y2k"][data-mode="dark"] {
+  --opt-ink: #16082e;
+  --opt-canvas: radial-gradient(circle at 20% 20%, rgba(236,72,153,0.25), transparent 35%), radial-gradient(circle at 80% 30%, rgba(167,139,250,0.3), transparent 42%), radial-gradient(circle at 50% 90%, rgba(34,211,238,0.22), transparent 44%), linear-gradient(135deg, #1a0b35 0%, #0e1340 50%, #2a0f33 100%);
+  --opt-panel: rgba(255, 255, 255, 0.07); --opt-panel2: rgba(255, 255, 255, 0.05); --opt-edge: rgba(255, 255, 255, 0.14);
+  --opt-ce: rgba(167, 139, 250, 0.14); --opt-pe: rgba(236, 72, 153, 0.14);
+  --opt-text: #f5e9ff; --opt-muted: #c4aef0; --opt-faint: #9d86c4;
+  --opt-accent: #a78bfa; --opt-call: #67e8f9; --opt-put: #fb923c; --opt-pos: #34d399; --opt-neg: #f472b6; --opt-warn: #fbbf24;
+  --opt-scroll-track: transparent; --opt-scroll-thumb: rgba(167, 139, 250, 0.4); --opt-scroll-thumb-hover: rgba(167, 139, 250, 0.6);
+}
+
+/* japanese → DARK */
+:root[data-theme="japanese"][data-mode="dark"] {
+  --opt-ink: #161412; --opt-canvas: #161412; --opt-panel: #1e1b18; --opt-panel2: #242019; --opt-edge: rgba(255, 255, 255, 0.08);
+  --opt-ce: #1a1f22; --opt-pe: #221a16;
+  --opt-text: #ece8e1; --opt-muted: #a39c90; --opt-faint: #857e72;
+  --opt-accent: #e0334f; --opt-call: #5e9bb5; --opt-put: #e0894f; --opt-pos: #4ade80; --opt-neg: #f0808f; --opt-warn: #d6a44e;
+  --opt-scroll-track: #161412; --opt-scroll-thumb: #363029; --opt-scroll-thumb-hover: #463f36;
 }

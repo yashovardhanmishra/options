@@ -92,13 +92,15 @@ export default function PayoffChart({ payoff, spot, expiryLabel, clockLabel }) {
   return (
     <div ref={wrapRef} className="relative h-full w-full">
       <svg width={w} height={h} className="block" onMouseMove={onMove} onMouseLeave={() => setHoverX(null)}>
+        {/* Themed backdrop (matches the active template's canvas). */}
+        <rect x="0" y="0" width={w} height={h} rx="8" fill="var(--opt-ink)" />
         {/* sigma band shading (between -2σ and +2σ, light) */}
         {sigma?.m2 != null && sigma?.p2 != null && (
-          <rect x={xf(Math.max(sLo, sigma.m2))} y={y0} width={Math.max(0, xf(Math.min(sHi, sigma.p2)) - xf(Math.max(sLo, sigma.m2)))} height={y1 - y0} fill="#1e2a3a" opacity="0.25" />
+          <rect x={xf(Math.max(sLo, sigma.m2))} y={y0} width={Math.max(0, xf(Math.min(sHi, sigma.p2)) - xf(Math.max(sLo, sigma.m2)))} height={y1 - y0} fill="var(--opt-edge)" opacity="0.25" />
         )}
         {/* loss zones (outside breakevens) faint red backdrop is implied by the red area fill */}
-        <path d={greenArea} fill="#16a34a" opacity="0.18" />
-        <path d={redArea} fill="#dc2626" opacity="0.16" />
+        <path d={greenArea} fill="var(--opt-pos)" opacity="0.18" />
+        <path d={redArea} fill="var(--opt-neg)" opacity="0.16" />
 
         {/* y grid + labels */}
         {Array.from({ length: yTicks + 1 }, (_, i) => {
@@ -106,55 +108,55 @@ export default function PayoffChart({ payoff, spot, expiryLabel, clockLabel }) {
           const y = yf(v)
           return (
             <g key={i}>
-              <line x1={x0} x2={x1} y1={y} y2={y} stroke="rgba(40,54,74,0.35)" strokeWidth="1" />
-              <text x={x1 - 2} y={y - 2} textAnchor="end" fontSize="9" fill="#64748b" fontFamily="ui-monospace,monospace">{money(v)}</text>
+              <line x1={x0} x2={x1} y1={y} y2={y} stroke="var(--opt-edge)" strokeWidth="1" />
+              <text x={x1 - 2} y={y - 2} textAnchor="end" fontSize="9" fill="var(--opt-muted)" fontFamily="ui-monospace,monospace">{money(v)}</text>
             </g>
           )
         })}
         {/* zero line */}
-        <line x1={x0} x2={x1} y1={yZero} y2={yZero} stroke="#64748b" strokeWidth="1" />
+        <line x1={x0} x2={x1} y1={yZero} y2={yZero} stroke="var(--opt-muted)" strokeWidth="1" />
 
         {/* sigma lines */}
         {sigLines.map((s) => (
           <g key={s.label}>
-            <line x1={xf(s.v)} x2={xf(s.v)} y1={y0} y2={y1} stroke="#3b4d66" strokeDasharray="3 3" strokeWidth="1" opacity="0.7" />
-            <text x={xf(s.v)} y={y0 + 9} textAnchor="middle" fontSize="8.5" fill="#64748b">{s.label}</text>
+            <line x1={xf(s.v)} x2={xf(s.v)} y1={y0} y2={y1} stroke="var(--opt-edge)" strokeDasharray="3 3" strokeWidth="1" opacity="0.7" />
+            <text x={xf(s.v)} y={y0 + 9} textAnchor="middle" fontSize="8.5" fill="var(--opt-muted)">{s.label}</text>
           </g>
         ))}
 
         {/* expiry curve (green/red) + at-clock dashed curve */}
-        <path d={nowLine} fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeDasharray="5 3" opacity="0.85" />
-        <path d={gLine} fill="none" stroke="#16a34a" strokeWidth="2" />
-        <path d={rLine} fill="none" stroke="#dc2626" strokeWidth="2" />
+        <path d={nowLine} fill="none" stroke="var(--opt-call)" strokeWidth="1.5" strokeDasharray="5 3" opacity="0.85" />
+        <path d={gLine} fill="none" stroke="var(--opt-pos)" strokeWidth="2" />
+        <path d={rLine} fill="none" stroke="var(--opt-neg)" strokeWidth="2" />
 
         {/* breakevens */}
         {breakevens.map((be, i) => (
           <g key={i}>
-            <line x1={xf(be)} x2={xf(be)} y1={yZero - 5} y2={yZero + 5} stroke="#e2e8f0" strokeWidth="1.5" />
-            <text x={xf(be)} y={y1 + 14} textAnchor="middle" fontSize="9" fill="#94a3b8" fontFamily="ui-monospace,monospace">{Math.round(be)}</text>
+            <line x1={xf(be)} x2={xf(be)} y1={yZero - 5} y2={yZero + 5} stroke="var(--opt-text)" strokeWidth="1.5" />
+            <text x={xf(be)} y={y1 + 14} textAnchor="middle" fontSize="9" fill="var(--opt-muted)" fontFamily="ui-monospace,monospace">{Math.round(be)}</text>
           </g>
         ))}
 
         {/* current spot */}
         {spot != null && spot >= sLo && spot <= sHi && (
           <g>
-            <line x1={xf(spot)} x2={xf(spot)} y1={y0} y2={y1} stroke="#e2e8f0" strokeWidth="1" opacity="0.8" />
-            <text x={xf(spot)} y={y0 - 4} textAnchor="middle" fontSize="9.5" fill="#e2e8f0" fontWeight="bold">Spot {spot.toFixed(0)}</text>
+            <line x1={xf(spot)} x2={xf(spot)} y1={y0} y2={y1} stroke="var(--opt-text)" strokeWidth="1" opacity="0.8" />
+            <text x={xf(spot)} y={y0 - 4} textAnchor="middle" fontSize="9.5" fill="var(--opt-text)" fontWeight="bold">Spot {spot.toFixed(0)}</text>
           </g>
         )}
 
         {/* x ticks */}
         {Array.from({ length: xTicks + 1 }, (_, i) => {
           const s = sLo + ((sHi - sLo) * i) / xTicks
-          return <text key={i} x={xf(s)} y={y1 + 14} textAnchor="middle" fontSize="9" fill="#475569" fontFamily="ui-monospace,monospace">{Math.round(s)}</text>
+          return <text key={i} x={xf(s)} y={y1 + 14} textAnchor="middle" fontSize="9" fill="var(--opt-faint)" fontFamily="ui-monospace,monospace">{Math.round(s)}</text>
         })}
 
         {/* hover */}
         {hp && (
           <g>
-            <line x1={xf(hp.S)} x2={xf(hp.S)} y1={y0} y2={y1} stroke="#94a3b8" strokeWidth="1" strokeDasharray="2 2" />
-            <circle cx={xf(hp.S)} cy={yf(hp.expiry)} r="3" fill={hp.expiry >= 0 ? '#16a34a' : '#dc2626'} />
-            <circle cx={xf(hp.S)} cy={yf(hp.now)} r="3" fill="#38bdf8" />
+            <line x1={xf(hp.S)} x2={xf(hp.S)} y1={y0} y2={y1} stroke="var(--opt-muted)" strokeWidth="1" strokeDasharray="2 2" />
+            <circle cx={xf(hp.S)} cy={yf(hp.expiry)} r="3" fill={hp.expiry >= 0 ? 'var(--opt-pos)' : 'var(--opt-neg)'} />
+            <circle cx={xf(hp.S)} cy={yf(hp.now)} r="3" fill="var(--opt-call)" />
           </g>
         )}
       </svg>

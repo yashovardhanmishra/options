@@ -17,13 +17,16 @@ import { loadSpot, loadExpiries, loadDates } from '../data/client.js'
 import { snapshotAt, makeContext } from '../data/snapshot.js'
 import { portfolioAt } from '../portfolio/book.js'
 import { runSession } from '../replay/runner.js'
-import { entry, exitLeg, exitGroup, exitPortfolio } from '../portfolio/actions.js'
-import { speedToBarsPerFrame } from '../replay/transport.js'
+import { entry, exitLeg, exitGroup, exitPortfolio, reduceLots, entriesFromSpecs } from '../portfolio/actions.js'
+import { resolveStrategy as resolveStrategyCatalog, atmStrikeOf, inferStep } from '../strategy/catalog.js'
+import { lotSize as lotSizeFor, isMonthlyExpiry } from '../config/lotsize.js'
 import * as TL from '../replay/timeline.js'
 import { checkLimits } from '../engine/risk.js'
 import { yearsToExpiry } from '../engine/time.js'
 import { impliedVol } from '../engine/iv.js'
 import { strategySummary } from '../engine/payoff.js'
+import { bookMargin, previewMargin } from '../engine/margin.js'
+import { detectEvents } from '../replay/events.js'
 
 // ATM implied vol at the clock: invert the option closest to spot (CE, then PE). Falls back
 // to null so callers can substitute an average leg IV.
@@ -40,8 +43,6 @@ function computeAtmIv(chainSnap, S, T, r = 0.065) {
   return null
 }
 
-const TICK_MS = 60 // play tick; speed = bars advanced per tick (render cadence only)
-
 export function useSim({ base = '', token, ready = true } = {}) {
   // ---- inputs / selection ----
   const [expiries, setExpiries] = useState([])
@@ -55,15 +56,21 @@ export function useSim({ base = '', token, ready = true } = {}) {
   // ---- THE state ----
   const [clockIndex, setClockIndex] = useState(0)
   const [userActions, setUserActions] = useState([])
-  const [limits, setLimitsState] = useState({ portfolio: {}, groups: {} })
+  const [limits, setLimitsState] = useState({ portfolio: {}, groups: {}, pnl: {} })
 
   // ---- transport + analysis ----
-  const [speed, setSpeed] = useState('5x')
+  // Playback cadence is explicit: advance `candlesPerStep` candles every `intervalSec`
+  // real seconds (instead of an abstract 1x/5x multiplier). Every intervening bar is
+  // still folded in fullRun, so jumping N candles per tick never skips evaluation.
+  const [candlesPerStep, setCandlesPerStep] = useState(1)
+  const [intervalSec, setIntervalSec] = useState(1)
   const [playing, setPlaying] = useState(false)
   const [multiplier, setMultiplier] = useState(1)
 
   const idRef = useRef(0) // leg-id counter
+  const grpRef = useRef(0) // strategy group-id counter
   const spotRef = useRef(null) // cached spot bars
+  const pendingDateRef = useRef(null) // a "jump to this date" request awaiting expiry+data load
 
   // expiries on mount (wait until auth is ready so the deployed backend doesn't 401)
   useEffect(() => {
@@ -81,7 +88,9 @@ export function useSim({ base = '', token, ready = true } = {}) {
       .then((ds) => {
         if (cancel) return
         setAllDates(ds)
-        setFromDate(ds.length ? ds[Math.max(0, ds.length - 2)] : '')
+        const want = pendingDateRef.current
+        if (want && ds.includes(want)) setFromDate(want) // a jump-to-date request picks its day
+        else setFromDate(ds.length ? ds[Math.max(0, ds.length - 2)] : '')
       })
       .catch((e) => !cancel && setError(String(e)))
     return () => { cancel = true }
@@ -98,7 +107,10 @@ export function useSim({ base = '', token, ready = true } = {}) {
       const { session, timeline } = await loadReplay({ base, expiry, dates, token, spotBars, expiries })
       if (cancel) return
       setLoaded({ session, timeline, expiry })
-      setClockIndex(0); setUserActions([]); idRef.current = 0; setPlaying(false)
+      setUserActions([]); idRef.current = 0; grpRef.current = 0; setPlaying(false)
+      const want = pendingDateRef.current
+      if (want) { pendingDateRef.current = null; setClockIndex(TL.indexOfDateStart(timeline, want)) }
+      else setClockIndex(0)
       setLoading(false)
     })().catch((e) => { if (!cancel) { setError(String(e)); setLoading(false) } })
     return () => { cancel = true }
@@ -136,6 +148,11 @@ export function useSim({ base = '', token, ready = true } = {}) {
   // ---- strategy payoff analytics (StockMock-style), recomputed at the clock ----
   const Texp = useMemo(() => (loaded ? Math.max(0, yearsToExpiry(t, loaded.expiry)) : 0), [loaded, t])
   const spot = chainSnap?.S ?? null
+  // Lot size for the loaded expiry (drives the trade-ticket Qty = lots × lotSize).
+  const lotSizeNow = useMemo(
+    () => (loaded ? lotSizeFor('NIFTY', loaded.expiry, isMonthlyExpiry(loaded.expiry, expiries)) : null),
+    [loaded, expiries],
+  )
   const atmIv = useMemo(() => computeAtmIv(chainSnap, spot, Texp), [chainSnap, spot, Texp])
   const payoff = useMemo(() => {
     if (!book || !book.openLegs.length || spot == null) return null
@@ -146,6 +163,25 @@ export function useSim({ base = '', token, ready = true } = {}) {
     }))
     return strategySummary(legs, { S0: spot, Tnow: Texp, Texp, atmIv: fallback, mult: multiplier })
   }, [book, spot, Texp, atmIv, multiplier])
+
+  // ---- margin estimate (NSE SPAN+exposure approx) for the open book, capped at the
+  //      defined-risk max-loss via the book payoff. Pure (engine/margin.js). ----
+  const margin = useMemo(
+    () => (book?.openLegs.length ? bookMargin(book, payoff, { spot, lotSize: lotSizeNow, mult: multiplier }) : null),
+    [book, payoff, spot, lotSizeNow, multiplier],
+  )
+  // Margin for a RESOLVED strategy preview (StrategyPicker, before placing): builds a preview
+  // payoff from the resolution's legs so the hedge cap applies to spreads, then estimates.
+  const marginFor = useCallback(
+    (res) => {
+      if (!res?.specs?.length || spot == null) return null
+      const fallback = atmIv || 0.15
+      const legs = res.specs.map((s) => ({ strike: s.strike, type: s.type, side: s.side, lots: s.lots, lotSize: lotSizeNow || 1, entryPrice: s.price, sigma: fallback }))
+      const pay = strategySummary(legs, { S0: spot, Tnow: Texp, Texp, atmIv: fallback, mult: multiplier })
+      return previewMargin(res.specs, { spot, lotSize: lotSizeNow || 1, mult: multiplier, payoff: pay })
+    },
+    [spot, atmIv, Texp, lotSizeNow, multiplier],
+  )
 
   // ---- transport ----
   const seek = useCallback((i) => setClockIndex(() => Math.max(0, Math.min(len - 1, i | 0))), [len])
@@ -175,16 +211,43 @@ export function useSim({ base = '', token, ready = true } = {}) {
     seek(ss[Math.max(0, Math.min(ss.length - 1, (i < 0 ? 0 : i) + dir))].startIndex)
   }, [timeline, ci, len, seek])
 
-  // play loop: advance `barsPerFrame` per tick; render only the landed bar (every
-  // intervening bar was already evaluated in fullRun, so nothing is skipped).
+  // ---- jump-to-event: detect notable bars ONCE (off the clock, so scrub/play never re-scan).
+  //      spots = forward-filled spot close per timeline index (anti-lookahead via snapAtLite). ----
+  const spots = useMemo(() => (loaded ? timeline.times.map((u) => snapAtLite(u).S) : []), [loaded, timeline, snapAtLite])
+  const events = useMemo(
+    () => (loaded ? detectEvents({ spots, curve: fullRun?.curve, sessions: timeline.sessions, expiry: loaded.expiry }) : []),
+    [loaded, spots, fullRun, timeline],
+  )
+  const jumpTo = seek
+
+  // Jump the replay to a specific calendar date (famous-day / daily-challenge): pick the expiry
+  // contract live on/after that date, set the load window to the date, and seek to its open. The
+  // pendingDateRef threads the request through the expiry→dates→load effects above.
+  const jumpToDate = useCallback((date) => {
+    if (!date || !expiries.length) return
+    const exp = expiries.find((e) => e >= date) || expiries[expiries.length - 1]
+    if (exp === expiry && fromDate === date && timeline) {
+      pendingDateRef.current = null
+      seek(TL.indexOfDateStart(timeline, date)) // already loaded → just re-seek
+      return
+    }
+    pendingDateRef.current = date
+    if (exp === expiry) setFromDate(date)
+    else setExpiry(exp)
+  }, [expiries, expiry, fromDate, timeline, seek])
+
+  // play loop: every `intervalSec` real seconds advance `candlesPerStep` candles; render
+  // the landed bar (every intervening bar was already folded in fullRun, so nothing is
+  // skipped — the curve/risk stay speed-independent).
   useEffect(() => {
     if (!playing || !loaded) return
-    const bpf = speedToBarsPerFrame(speed)
+    const step = Math.max(1, candlesPerStep | 0)
+    const period = Math.max(100, (intervalSec || 1) * 1000)
     const id = setInterval(() => {
-      setClockIndex((c) => (c >= len - 1 ? c : Math.min(len - 1, c + (bpf === Infinity ? len : bpf))))
-    }, TICK_MS)
+      setClockIndex((c) => (c >= len - 1 ? c : Math.min(len - 1, c + step)))
+    }, period)
     return () => clearInterval(id)
-  }, [playing, loaded, speed, len])
+  }, [playing, loaded, candlesPerStep, intervalSec, len])
   useEffect(() => { if (loaded && clockIndex >= len - 1) setPlaying(false) }, [clockIndex, loaded, len])
 
   // ---- action emitters (the ONLY way the UI mutates state besides the clock) ----
@@ -196,6 +259,42 @@ export function useSim({ base = '', token, ready = true } = {}) {
     setUserActions((log) => [...log, entry({ t, legId: nextId(), expiry: loaded.expiry, strike, type, side, lots, price })])
   }, [loaded, t, snapAtFull])
 
+  // ATM strike + strike step at the clock (drives one-click strategy resolution + previews).
+  const atmStrike = useMemo(() => atmStrikeOf(chainSnap?.chain, spot), [chainSnap, spot])
+  const strikeStep = useMemo(() => inferStep(chainSnap?.chain), [chainSnap])
+
+  // Resolve a catalog strategy's ATM-relative legs to real, priced strikes — WITHOUT placing.
+  // The picker calls this per card to preview legs + net credit/debit. Pure read of the snap.
+  const resolveStrategy = useCallback(
+    (id, { lots = 1, width = 2 } = {}) => {
+      if (!loaded || !chainSnap?.chain?.length) return null
+      const snap = snapAtFull(t)
+      return resolveStrategyCatalog(id, {
+        chain: chainSnap.chain, S: spot, lots, w: width,
+        priceFor: (lg) => snap.priceFor(lg), lotSize: lotSizeNow || 1,
+      })
+    },
+    [loaded, chainSnap, t, snapAtFull, spot, lotSizeNow],
+  )
+
+  // One-click place: resolve, then append all legs as a single grouped batch of entries at the
+  // clock (one setUserActions → one fold). Returns the resolution ({ specs, missing, net }); a
+  // non-empty `missing` means the chain didn't reach some strikes and nothing was placed.
+  const placeStrategy = useCallback(
+    (id, opts = {}) => {
+      const r = resolveStrategy(id, opts)
+      if (!r || r.missing.length || !r.specs.length) return r
+      const snap = snapAtFull(t)
+      const groupId = `G${++grpRef.current}`
+      const specs = r.specs.map((s) => ({
+        underlying: 'NIFTY', expiry: loaded.expiry, groupId, type: s.type, side: s.side, strike: s.strike, lots: s.lots,
+      }))
+      setUserActions((log) => [...log, ...entriesFromSpecs(specs, { t, priceFor: (lg) => snap.priceFor(lg), nextId })])
+      return r
+    },
+    [resolveStrategy, loaded, t, snapAtFull],
+  )
+
   const squareOffLeg = useCallback((legId) => {
     const st = book?.openLegs.find((s) => s.leg.id === legId)
     if (!st) return
@@ -203,6 +302,17 @@ export function useSim({ base = '', token, ready = true } = {}) {
     if (price == null) return
     setUserActions((log) => [...log, exitLeg({ t, legId, price })])
   }, [book, t, snapAtLite])
+
+  // Partial close: exit `lots` of a leg at the current LTP (full lots → clean exit action).
+  const reduceLeg = useCallback((legId, lots) => {
+    const st = book?.openLegs.find((s) => s.leg.id === legId)
+    if (!st) return
+    const n = Math.min(Math.max(1, lots | 0), st.leg.lots)
+    if (n >= st.leg.lots) return squareOffLeg(legId)
+    const price = snapAtLite(t).priceFor(st.leg)
+    if (price == null) return
+    setUserActions((log) => [...log, reduceLots({ t, legId, lots: n, price })])
+  }, [book, t, snapAtLite, squareOffLeg])
 
   const pricesFor = (states) => {
     const snap = snapAtLite(t)
@@ -218,7 +328,7 @@ export function useSim({ base = '', token, ready = true } = {}) {
     setUserActions((log) => [...log, exitPortfolio({ t, prices: pricesFor(book.openLegs) })])
   }, [book, t, snapAtLite])
 
-  const resetTrades = useCallback(() => { setUserActions([]); idRef.current = 0 }, [])
+  const resetTrades = useCallback(() => { setUserActions([]); idRef.current = 0; grpRef.current = 0 }, [])
   const setLimits = useCallback((updater) => setLimitsState(updater), [])
 
   return {
@@ -227,11 +337,11 @@ export function useSim({ base = '', token, ready = true } = {}) {
     // engine outputs (read-only)
     loaded, timeline, len, clockIndex, t, book, chainSnap, curve, breaches, warnings, limits, userActions, fullRun,
     // strategy analytics
-    spot, Texp, atmIv, payoff, multiplier, setMultiplier,
+    spot, Texp, atmIv, payoff, multiplier, setMultiplier, lotSizeNow, atmStrike, strikeStep, margin, marginFor,
     // transport + time navigation
-    speed, setSpeed, playing, setPlaying, seek, stepBy,
-    sessionDates, currentSession, seekToDateTime, stepMinutes, toSOD, toEOD, dayStep,
+    candlesPerStep, setCandlesPerStep, intervalSec, setIntervalSec, playing, setPlaying, seek, stepBy,
+    sessionDates, currentSession, seekToDateTime, stepMinutes, toSOD, toEOD, dayStep, events, jumpTo, jumpToDate,
     // emitters
-    placeEntry, squareOffLeg, squareOffGroup, squareOffAll, resetTrades, setLimits,
+    placeEntry, placeStrategy, resolveStrategy, squareOffLeg, reduceLeg, squareOffGroup, squareOffAll, resetTrades, setLimits,
   }
 }

@@ -1,7 +1,7 @@
 // The replay simulator page. Owns nothing but UI state (which strike's ticket is open);
 // all replay state + engine outputs come from useSim. Components render engine outputs and
 // emit actions — no P&L/Greeks/fold logic here. Opened in its own tab via ?view=sim.
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import OptionChain from '../../components/OptionChain'
 import { authEnabled, getAccessToken, signOut } from '../../supabase'
 import { useSim } from './useSim.js'
@@ -14,9 +14,14 @@ import EquityCurve from './EquityCurve.jsx'
 import PayoffChart from './PayoffChart.jsx'
 import StrategyStats from './StrategyStats.jsx'
 import GreeksTable from './GreeksTable.jsx'
+import SizingPanel from './SizingPanel.jsx'
 import TradeTicket from './TradeTicket.jsx'
+import StrategyPicker from './StrategyPicker.jsx'
+import ThemeSwitcher from '../../components/ThemeSwitcher.jsx'
+import { downloadCard } from './shareCard.js'
+import { FAMOUS_DAYS, dailyChallengeDate } from '../replay/famousDays.js'
 
-const TABS = ['Payoff', 'MTM', 'Greeks', 'Risk']
+const TABS = ['Payoff', 'MTM', 'Greeks', 'Risk', 'Sizing']
 
 const API_BASE =
   import.meta.env.VITE_API_BASE !== undefined ? import.meta.env.VITE_API_BASE : import.meta.env.PROD ? '' : 'http://localhost:8000'
@@ -34,7 +39,65 @@ export default function SimPage({ userEmail }) {
 
   const sim = useSim({ base: API_BASE, token, ready })
   const [pick, setPick] = useState(null) // { strike, type } whose ticket is open
+  const [showStrats, setShowStrats] = useState(false) // strategy-builder modal
   const [tab, setTab] = useState('Payoff')
+
+  // Open-position overlay for the chain: net side per strike+type (buy>0/sell<0) + the set of
+  // strikes held on BOTH CE and PE (straddle/strangle legs → highlighted differently).
+  const positions = useMemo(() => {
+    const net = {}
+    const ce = new Set()
+    const pe = new Set()
+    for (const s of sim.book?.openLegs ?? []) {
+      const { strike, type, side, lots } = s.leg
+      const k = `${strike}${type}`
+      net[k] = (net[k] ?? 0) + side * lots
+      ;(type === 'CE' ? ce : pe).add(strike)
+    }
+    const both = new Set([...ce].filter((k) => pe.has(k)))
+    return { net, both }
+  }, [sim.book])
+
+  // Data for the shareable PNG card (current position snapshot at the clock).
+  const shareData = useMemo(
+    () => ({
+      pnl: sim.book?.total ?? 0,
+      maxProfit: sim.payoff?.maxProfit,
+      maxLoss: sim.payoff?.maxLoss,
+      pop: sim.payoff?.pop,
+      netCredit: sim.payoff?.netCredit,
+      legs: (sim.book?.openLegs ?? []).map((s) => ({ side: s.leg.side, lots: s.leg.lots, strike: s.leg.strike, type: s.leg.type, entry: s.leg.entryPrice })),
+      spot: sim.spot,
+      expiry: sim.expiry,
+      clock: hhmm(sim.t),
+    }),
+    [sim.book, sim.payoff, sim.spot, sim.expiry, sim.t],
+  )
+
+  const onReplayPick = (v) => {
+    if (!v) return
+    if (v === '__challenge') {
+      const d = dailyChallengeDate(sim.allDates, new Date().toISOString().slice(0, 10))
+      if (d) sim.jumpToDate(d)
+    } else sim.jumpToDate(v)
+  }
+
+  // Replay keyboard shortcuts: Space = play/pause, ←/→ = step, Home/End = jump to ends,
+  // B = open the strategy builder.
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = e.target?.tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || e.metaKey || e.ctrlKey) return
+      if (e.code === 'Space') { e.preventDefault(); sim.setPlaying((p) => !p) }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); sim.stepBy(1) }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); sim.stepBy(-1) }
+      else if (e.key === 'Home') { e.preventDefault(); sim.seek(0) }
+      else if (e.key === 'End') { e.preventDefault(); sim.seek(sim.len - 1) }
+      else if (e.key === 'b' || e.key === 'B') { e.preventDefault(); setShowStrats(true) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sim])
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-ink text-slate-200">
@@ -69,8 +132,40 @@ export default function SimPage({ userEmail }) {
             {sim.allDates.map((d) => <option key={d} value={d}>{fmtDate(d)}</option>)}
           </select>
         </label>
+        <label className="flex items-center gap-1.5 text-sm">
+          <span className="text-xs uppercase tracking-wide text-slate-500">Replay</span>
+          <select
+            value=""
+            onChange={(e) => { onReplayPick(e.target.value); e.target.value = '' }}
+            title="Jump to a famous market day, or take today's deterministic challenge"
+            className="max-w-[12rem] rounded border border-edge bg-panel px-2 py-1 text-xs text-slate-200 outline-none focus:border-sky-600"
+          >
+            <option value="">Famous day…</option>
+            <option value="__challenge">Daily challenge</option>
+            {FAMOUS_DAYS.map((f) => <option key={f.date} value={f.date}>{f.label} · {f.date}</option>)}
+          </select>
+        </label>
 
         <div className="ml-auto flex items-center gap-2">
+          {sim.loaded && !sim.loading && (
+            <button
+              onClick={() => setShowStrats(true)}
+              title="One-click strategy builder (B)"
+              className="rounded border border-sky-700/60 bg-sky-600/15 px-2.5 py-1 text-xs font-semibold text-sky-300 hover:bg-sky-600/30"
+            >
+              ⊞ Strategies
+            </button>
+          )}
+          {sim.loaded && !sim.loading && (
+            <button
+              onClick={() => downloadCard(shareData, hhmm(sim.t).replace(':', ''))}
+              title="Download a shareable PNG of this position"
+              className="rounded border border-edge bg-panel2 px-2.5 py-1 text-xs text-slate-300 hover:bg-edge hover:text-white"
+            >
+              Share
+            </button>
+          )}
+          <ThemeSwitcher />
           {sim.userActions.length > 0 && (
             <button onClick={sim.resetTrades} className="rounded border border-edge bg-panel2 px-2.5 py-1 text-xs text-slate-300 hover:bg-edge">
               Reset trades
@@ -101,7 +196,7 @@ export default function SimPage({ userEmail }) {
               Click a CE / PE LTP to trade · {sim.chainSnap?.chain?.length ?? 0} strikes
             </div>
             <div className="min-h-0 flex-1 overflow-hidden">
-              <OptionChain chain={sim.chainSnap?.chain || []} onSelect={(strike, type) => setPick({ strike, type })} selected={null} />
+              <OptionChain chain={sim.chainSnap?.chain || []} onSelect={(strike, type) => setPick({ strike, type })} selected={null} positions={positions} />
             </div>
           </section>
 
@@ -131,6 +226,7 @@ export default function SimPage({ userEmail }) {
               {tab === 'Risk' && (
                 <RiskPanel book={sim.book} limits={sim.limits} warnings={sim.warnings} breaches={sim.breaches} setLimits={sim.setLimits} />
               )}
+              {tab === 'Sizing' && <SizingPanel book={sim.book} payoff={sim.payoff} margin={sim.margin} />}
             </div>
 
             <div className="h-[36%] min-h-[150px] border-t border-edge">
@@ -139,6 +235,7 @@ export default function SimPage({ userEmail }) {
                 multiplier={sim.multiplier}
                 setMultiplier={sim.setMultiplier}
                 onExitLeg={sim.squareOffLeg}
+                onReduceLeg={sim.reduceLeg}
                 onExitAll={sim.squareOffAll}
                 onReset={sim.resetTrades}
               />
@@ -147,7 +244,8 @@ export default function SimPage({ userEmail }) {
         </main>
       )}
 
-      {pick && <TradeTicket pick={pick} chainSnap={sim.chainSnap} onPlace={sim.placeEntry} onClose={() => setPick(null)} />}
+      {pick && <TradeTicket pick={pick} chainSnap={sim.chainSnap} lotSize={sim.lotSizeNow} onPlace={sim.placeEntry} onClose={() => setPick(null)} />}
+      {showStrats && <StrategyPicker sim={sim} onClose={() => setShowStrats(false)} />}
     </div>
   )
 }

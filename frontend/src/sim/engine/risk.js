@@ -23,3 +23,21 @@ export function checkLimits(greeks, limits = {}, warnPct = 0.8) {
 }
 
 export { METRICS }
+
+/**
+ * P&L-based auto-exit decision (stop-loss / target / trailing) on the total book MTM.
+ * PURE: given the current total P&L and the running peak, decide whether to square off.
+ *   pnl: { maxLoss?, target?, trailing? } — all ₹ amounts; null/0 = that rule is off.
+ *   - target:   exit when total >= target            (lock the profit)
+ *   - maxLoss:  exit when total <= -maxLoss          (cap the loss)
+ *   - trailing: arms once peak >= trailing, then exit when (peak - total) >= trailing
+ * Returns { exit, reason } with reason 'target' | 'stop_loss' | 'trailing_stop'.
+ */
+export function checkPnlExit(total, peak, pnl = {}) {
+  const { maxLoss, target, trailing } = pnl
+  if (target != null && target > 0 && total >= target) return { exit: true, reason: 'target' }
+  if (maxLoss != null && maxLoss > 0 && total <= -maxLoss) return { exit: true, reason: 'stop_loss' }
+  if (trailing != null && trailing > 0 && peak >= trailing && peak - total >= trailing)
+    return { exit: true, reason: 'trailing_stop' }
+  return { exit: false, reason: null }
+}

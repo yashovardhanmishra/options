@@ -74,10 +74,10 @@ export default function CodeModal({ title, subtitle, code, defaultCode, editable
             value={text}
             onChange={(e) => setText(e.target.value)}
             spellCheck={false}
-            className="min-h-0 flex-1 resize-none whitespace-pre bg-ink/40 p-4 font-mono text-[12px] leading-relaxed text-slate-200 outline-none"
+            className="code-mono min-h-0 flex-1 resize-none whitespace-pre bg-ink/40 p-4 text-[12px] leading-relaxed text-slate-200 outline-none"
           />
         ) : (
-          <pre className="min-h-0 flex-1 overflow-auto whitespace-pre p-4 font-mono text-[12px] leading-relaxed text-slate-200">
+          <pre className="code-mono min-h-0 flex-1 overflow-auto whitespace-pre p-4 text-[12px] leading-relaxed text-slate-200">
             {code || '// Pine Script not available for this item.'}
           </pre>
         )}
@@ -106,8 +106,8 @@ export default function CodeModal({ title, subtitle, code, defaultCode, editable
               </button>
               <button
                 onClick={apply}
-                className={`rounded-md px-3 py-1 text-xs font-semibold ${
-                  dirty ? 'bg-sky-600 text-white hover:bg-sky-500' : 'bg-sky-700/70 text-sky-100 hover:bg-sky-600'
+                className={`rounded-md px-3 py-1 text-xs font-semibold bg-sky-600 text-white hover:bg-sky-500 ${
+                  dirty ? '' : 'opacity-60'
                 }`}
               >
                 Apply

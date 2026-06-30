@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { money } from './fmt.js'
 
-export default function TradeTicket({ pick, chainSnap, onPlace, onClose }) {
+export default function TradeTicket({ pick, chainSnap, lotSize, onPlace, onClose }) {
   const [side, setSide] = useState(1) // +1 buy, -1 sell
   const [lots, setLots] = useState(1)
   if (!pick) return null
@@ -47,20 +47,52 @@ export default function TradeTicket({ pick, chainSnap, onPlace, onClose }) {
           </button>
         </div>
 
-        <label className="mb-3 flex items-center justify-between text-xs text-slate-400">
+        <div className="mb-3 flex items-center justify-between text-xs text-slate-400">
           <span>Lots</span>
-          <input
-            type="number"
-            min={1}
-            value={lots}
-            onChange={(e) => setLots(Math.max(1, Number(e.target.value) | 0))}
-            className="w-20 rounded border border-edge bg-panel2 px-2 py-1 text-right font-mono text-slate-100 outline-none focus:border-sky-600"
-          />
-        </label>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setLots((l) => Math.max(1, l - 1))}
+              className="flex h-7 w-7 items-center justify-center rounded border border-edge bg-panel2 text-lg font-bold leading-none text-slate-300 hover:bg-edge hover:text-white"
+            >
+              −
+            </button>
+            <input
+              type="number"
+              min={1}
+              value={lots}
+              onChange={(e) => setLots(Math.max(1, Number(e.target.value) | 0))}
+              className="w-14 rounded border border-edge bg-panel2 px-1 py-1 text-center font-mono text-slate-100 outline-none focus:border-sky-600"
+            />
+            <button
+              type="button"
+              onClick={() => setLots((l) => l + 1)}
+              className="flex h-7 w-7 items-center justify-center rounded border border-edge bg-panel2 text-lg font-bold leading-none text-slate-300 hover:bg-edge hover:text-white"
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+        {lotSize != null && (
+          <div className="mb-3 flex items-center justify-between text-[11px] text-slate-500">
+            <span>Quantity</span>
+            <span className="font-mono text-slate-300">
+              {(lots * lotSize).toLocaleString('en-IN')}{' '}
+              <span className="text-slate-600">
+                ({lots} × {lotSize})
+              </span>
+            </span>
+          </div>
+        )}
 
         <div className="mb-3 flex items-center justify-between text-[11px] text-slate-500">
           <span>Premium ({side === 1 ? 'pay' : 'collect'})</span>
-          <span className="font-mono">{ltp != null ? `≈ ${lots} lot${lots > 1 ? 's' : ''} × ${ltp.toFixed(2)}` : '—'}</span>
+          <span className="font-mono">
+            {ltp != null
+              ? `≈ ${money(lots * (lotSize || 1) * ltp)}`
+              : '—'}
+          </span>
         </div>
 
         <button

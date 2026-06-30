@@ -1,12 +1,15 @@
 // StockMock-style positions table: B/S, Lots, Qty, entry Date, Strike, Expiry, Entry, LTP,
 // P&L (₹ + %), and a per-leg square-off. Plus a Multiplier (analysis scalar) and totals.
 // Reads straight from portfolioAt(t); square-off emits an exit action at the clock.
+import { useState } from 'react'
 import { money, signed, pnlCls, dateTimeShort, expiryShort } from './fmt.js'
 
-export default function PositionsPanel({ book, multiplier = 1, setMultiplier, onExitLeg, onExitAll, onReset }) {
+export default function PositionsPanel({ book, multiplier = 1, setMultiplier, onReduceLeg, onExitAll, onReset }) {
+  const [exitLots, setExitLots] = useState({}) // per-leg "lots to exit" (default = full)
   if (!book) return null
   const legs = book.openLegs
   const lotSize = legs[0]?.lotSize ?? '—'
+  const setXL = (id, v) => setExitLots((m) => ({ ...m, [id]: v }))
 
   return (
     <div className="flex h-full flex-col">
@@ -28,7 +31,7 @@ export default function PositionsPanel({ book, multiplier = 1, setMultiplier, on
                 <th className="sticky top-0 bg-panel px-2 py-1">Entry</th>
                 <th className="sticky top-0 bg-panel px-2 py-1">LTP</th>
                 <th className="sticky top-0 bg-panel px-2 py-1">P&L</th>
-                <th className="sticky top-0 bg-panel px-2 py-1"></th>
+                <th className="sticky top-0 bg-panel px-2 py-1">Lots Exit</th>
               </tr>
             </thead>
             <tbody>
@@ -37,6 +40,7 @@ export default function PositionsPanel({ book, multiplier = 1, setMultiplier, on
                 const buy = L.side > 0
                 const premium = Math.abs(L.entryPrice * s.lotSize * L.lots) || 1
                 const pct = (s.mtm / premium) * 100
+                const xl = Math.min(L.lots, exitLots[L.id] ?? L.lots)
                 return (
                   <tr key={L.id} className="border-b border-edge/40 hover:bg-panel2/60">
                     <td className="px-2 py-1 text-left">
@@ -56,7 +60,34 @@ export default function PositionsPanel({ book, multiplier = 1, setMultiplier, on
                       {money(s.mtm * multiplier)} <span className="text-[9px] opacity-70">({signed(pct, 0)}%)</span>
                     </td>
                     <td className="px-2 py-1">
-                      <button onClick={() => onExitLeg(L.id)} title="Square off this leg" className="rounded px-1.5 text-[10px] text-slate-400 hover:bg-red-600/30 hover:text-red-200">✕</button>
+                      <div className="flex items-center justify-end gap-0.5">
+                        {/* Partial-exit lot selector: pick how many lots to square off. The −/+
+                            are disabled at the bounds (a 1-lot leg shows both greyed; use ✕). */}
+                        <button
+                          onClick={() => setXL(L.id, Math.max(1, xl - 1))}
+                          disabled={xl <= 1}
+                          title="Fewer lots to exit"
+                          className="flex h-4 w-4 items-center justify-center rounded border border-edge bg-panel2 text-[11px] leading-none text-slate-400 hover:bg-edge hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-panel2 disabled:hover:text-slate-400"
+                        >
+                          −
+                        </button>
+                        <span className="w-5 text-center text-[10px] text-slate-300">{xl}</span>
+                        <button
+                          onClick={() => setXL(L.id, Math.min(L.lots, xl + 1))}
+                          disabled={xl >= L.lots}
+                          title="More lots to exit"
+                          className="flex h-4 w-4 items-center justify-center rounded border border-edge bg-panel2 text-[11px] leading-none text-slate-400 hover:bg-edge hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-panel2 disabled:hover:text-slate-400"
+                        >
+                          +
+                        </button>
+                        <button
+                          onClick={() => onReduceLeg(L.id, xl)}
+                          title={xl >= L.lots ? 'Square off this leg' : `Exit ${xl} of ${L.lots} lots`}
+                          className="ml-1 rounded px-1.5 text-[11px] text-slate-400 hover:bg-red-600/30 hover:text-red-200"
+                        >
+                          {xl >= L.lots ? '✕' : '⤓'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )

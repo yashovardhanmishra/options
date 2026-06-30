@@ -10,6 +10,7 @@ import {
   TIMEFRAMES,
 } from '../utils/resample'
 import { INDICATORS, defaultParams } from '../utils/indicators'
+import { cssVar, chartThemeOptions, onThemeChange } from '../theme'
 import { detectPattern, PATTERN_BY_KEY, PATTERN_PINE } from '../utils/patterns'
 import { evalPine } from '../utils/pine'
 import { INDICATOR_PINE } from '../utils/pinescript'
@@ -220,25 +221,26 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
       width: el.clientWidth,
       height: el.clientHeight,
       layout: {
-        background: { color: '#0a0e14' },
-        textColor: '#8b9bb0',
+        // Follow the active template theme (resolved from --opt-* CSS vars).
+        background: { color: cssVar('--opt-ink', '#0a0e14') },
+        textColor: cssVar('--opt-muted', '#8b9bb0'),
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         fontSize: 11,
         // Hide the TradingView attribution logo from the chart surface.
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: 'rgba(40,54,74,0.35)' },
-        horzLines: { color: 'rgba(40,54,74,0.35)' },
+        vertLines: { color: cssVar('--opt-edge', 'rgba(40,54,74,0.35)') },
+        horzLines: { color: cssVar('--opt-edge', 'rgba(40,54,74,0.35)') },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
         vertLine: { color: '#3b4d66', width: 1, style: 2, labelBackgroundColor: '#1e2a3a' },
         horzLine: { color: '#3b4d66', width: 1, style: 2, labelBackgroundColor: '#1e2a3a' },
       },
-      rightPriceScale: { borderColor: '#1e2a3a' },
+      rightPriceScale: { borderColor: cssVar('--opt-edge', '#1e2a3a') },
       timeScale: {
-        borderColor: '#1e2a3a',
+        borderColor: cssVar('--opt-edge', '#1e2a3a'),
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 4,
@@ -329,8 +331,12 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
     })
     ro.observe(el)
 
+    // Re-skin the canvas when the template theme changes.
+    const stopTheme = onThemeChange(() => chart.applyOptions(chartThemeOptions()))
+
     return () => {
       ro.disconnect()
+      stopTheme()
       chart.remove()
       chartRef.current = null
       candleRef.current = null
@@ -788,7 +794,7 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
             {patterns.map((key) => {
               const p = PATTERN_BY_KEY[key]
               if (!p) return null
-              const col = p.dir === 'bull' ? '#22c55e' : p.dir === 'bear' ? '#ef4444' : '#9ca3af'
+              const col = p.dir === 'bull' ? '#22c55e' : p.dir === 'bear' ? '#ef4444' : 'var(--opt-faint)'
               return (
                 <div key={key} className="w-fit rounded bg-panel2/85 px-1.5 py-0.5 text-[11px] shadow shadow-black/30 backdrop-blur">
                   <div className="flex items-center gap-1.5">

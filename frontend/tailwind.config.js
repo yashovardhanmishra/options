@@ -3,16 +3,20 @@ export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
     extend: {
+      // The terminal palette is now CSS-variable driven so the whole app can be
+      // re-skinned by switching `data-theme` on <html>. Defaults (the original
+      // dark hex) live in src/index.css; per-template overrides sit alongside.
       colors: {
-        ink: '#0a0e14',
-        panel: '#0f1620',
-        panel2: '#131c28',
-        edge: '#1e2a3a',
-        ce: '#1b3a5c',
-        pe: '#5c2b1b',
+        ink: 'var(--opt-ink)',
+        panel: 'var(--opt-panel)',
+        panel2: 'var(--opt-panel2)',
+        edge: 'var(--opt-edge)',
+        ce: 'var(--opt-ce)',
+        pe: 'var(--opt-pe)',
       },
       fontFamily: {
-        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        mono: ['var(--opt-font-mono)', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        sans: ['var(--opt-font-sans)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
     },
   },

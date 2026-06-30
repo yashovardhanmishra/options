@@ -4,10 +4,16 @@
 // flips playing/speed in the hook. The readout is derived from the clock unix.
 import { hhmm, dateLabel, dow } from './fmt.js'
 
-const SPEEDS = ['1x', '5x', '30x', 'max']
+// Playback cadence: advance N candles every M seconds (explicit, not an abstract speed).
+const CANDLE_OPTS = [1, 2, 3, 5, 10]
+const INTERVAL_OPTS = [1, 2, 5, 10, 30]
 
 export default function TransportBar({ sim }) {
-  const { clockIndex, len, t, timeline, playing, setPlaying, speed, setSpeed, seek, stepBy, book, chainSnap } = sim
+  const {
+    clockIndex, len, t, timeline, playing, setPlaying,
+    candlesPerStep, setCandlesPerStep, intervalSec, setIntervalSec,
+    seek, stepBy, book, chainSnap,
+  } = sim
   const atEnd = clockIndex >= len - 1
   const atStart = clockIndex <= 0
   const session = timeline?.sessions.find((s) => clockIndex >= s.startIndex && clockIndex <= s.endIndex)
@@ -37,12 +43,24 @@ export default function TransportBar({ sim }) {
         <Btn onClick={() => seek(len - 1)} disabled={atEnd} title="To end">⏭</Btn>
       </div>
 
-      <div className="flex items-center gap-1">
-        {SPEEDS.map((s) => (
-          <Btn key={s} onClick={() => setSpeed(s)} active={speed === s} title={`${s} — bars per render tick (every bar is still evaluated)`}>
-            {s}
-          </Btn>
-        ))}
+      {/* Playback speed: N candles every M seconds (explicit, watchable). */}
+      <div className="flex items-center gap-1.5" title="Auto-play advances this many candles per tick">
+        <span className="text-[10px] uppercase tracking-wide text-slate-500">Step</span>
+        <div className="flex items-center gap-0.5">
+          {CANDLE_OPTS.map((n) => (
+            <Btn key={n} onClick={() => setCandlesPerStep(n)} active={candlesPerStep === n} title={`Advance ${n} candle${n > 1 ? 's' : ''} per tick`}>
+              {n}
+            </Btn>
+          ))}
+        </div>
+        <span className="text-[10px] text-slate-500">candle{candlesPerStep > 1 ? 's' : ''} every</span>
+        <div className="flex items-center gap-0.5" title="Real seconds between ticks">
+          {INTERVAL_OPTS.map((s) => (
+            <Btn key={s} onClick={() => setIntervalSec(s)} active={intervalSec === s} title={`One tick every ${s}s`}>
+              {s}s
+            </Btn>
+          ))}
+        </div>
       </div>
 
       {/* scrubber across the whole timeline */}

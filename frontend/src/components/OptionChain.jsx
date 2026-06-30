@@ -30,7 +30,21 @@ function OiBar({ value, max, side }) {
   )
 }
 
-export default function OptionChain({ chain, onSelect, selected, loading }) {
+// Held-position highlight on the LTP cell: buy → green, sell → red, both sides of the strike
+// held → sky blue. `positions` = { net: {`${strike}${type}`: netSide}, both: Set<strike> }.
+const HILITE = {
+  buy: 'rgba(16,185,129,0.28)',
+  sell: 'rgba(239,68,68,0.28)',
+  both: 'rgba(56,189,248,0.30)',
+}
+function sideHi(positions, strike, type) {
+  if (!positions) return null
+  if (positions.both?.has(strike)) return 'both'
+  const net = positions.net?.[`${strike}${type}`]
+  return net > 0 ? 'buy' : net < 0 ? 'sell' : null
+}
+
+export default function OptionChain({ chain, onSelect, selected, loading, positions }) {
   const { atmStrike, maxOi } = useMemo(() => {
     if (!chain || chain.length === 0) return { atmStrike: null, maxOi: 0 }
 
@@ -120,6 +134,8 @@ export default function OptionChain({ chain, onSelect, selected, loading }) {
             const isAtm = row.strike === atmStrike
             const ceSel = selected?.strike === row.strike && selected?.type === 'CE'
             const peSel = selected?.strike === row.strike && selected?.type === 'PE'
+            const ceHi = sideHi(positions, row.strike, 'CE')
+            const peHi = sideHi(positions, row.strike, 'PE')
 
             const ceCell =
               'cursor-pointer bg-sky-500/[0.04] px-2 py-1 transition-colors hover:bg-sky-500/20'
@@ -134,9 +150,7 @@ export default function OptionChain({ chain, onSelect, selected, loading }) {
             return (
               <tr
                 key={row.strike}
-                className={`border-b border-edge/40 ${
-                  isAtm ? 'bg-amber-400/[0.07]' : ''
-                }`}
+                className={isAtm ? 'bg-amber-400/[0.07]' : ''}
               >
                 {/* CALLS */}
                 <td className={`${ceCell} ${ceSelCls} w-[88px]`} onClick={onCe}>
@@ -165,6 +179,7 @@ export default function OptionChain({ chain, onSelect, selected, loading }) {
                 </td>
                 <td
                   className={`${ceCell} ${ceSelCls} font-semibold text-sky-200`}
+                  style={ceHi ? { background: HILITE[ceHi] } : undefined}
                   onClick={onCe}
                 >
                   {fmtLtp(row.ce?.ltp)}
@@ -184,6 +199,7 @@ export default function OptionChain({ chain, onSelect, selected, loading }) {
                 {/* PUTS */}
                 <td
                   className={`${peCell} ${peSelCls} text-left font-semibold text-orange-200`}
+                  style={peHi ? { background: HILITE[peHi] } : undefined}
                   onClick={onPe}
                 >
                   {fmtLtp(row.pe?.ltp)}

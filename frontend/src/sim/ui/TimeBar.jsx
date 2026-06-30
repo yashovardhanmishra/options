@@ -17,8 +17,28 @@ const HOURS = [9, 10, 11, 12, 13, 14, 15]
 const MINUTES = Array.from({ length: 60 }, (_, i) => i)
 const pad = (n) => String(n).padStart(2, '0')
 
+// One-line summary of a jump-to-event for its chip tooltip.
+const fmtDetail = (ev) => {
+  const d = ev.detail || {}
+  switch (ev.key) {
+    case 'spot_move':
+    case 'spot_up':
+    case 'spot_down':
+      return `${d.delta > 0 ? '+' : ''}${d.delta?.toFixed(1)} pts`
+    case 'dd_trough':
+      return `₹${Math.round(d.drawdown)}`
+    case 'mtm_peak':
+    case 'mtm_low':
+      return `₹${Math.round(d.equity)}`
+    case 'expiry_start':
+      return d.date
+    default:
+      return ''
+  }
+}
+
 export default function TimeBar({ sim }) {
-  const { t, currentSession, sessionDates, seekToDateTime, stepMinutes, toSOD, toEOD, dayStep } = sim
+  const { t, currentSession, sessionDates, seekToDateTime, stepMinutes, toSOD, toEOD, dayStep, events, jumpTo, clockIndex } = sim
   if (t == null || !currentSession) return null
   const d = new Date(t * 1000)
   const hh = d.getUTCHours()
@@ -26,12 +46,14 @@ export default function TimeBar({ sim }) {
   const date = currentSession.date
   const di = sessionDates.indexOf(date)
 
-  const Btn = ({ onClick, disabled, children, title }) => (
+  const Btn = ({ onClick, disabled, children, title, active }) => (
     <button
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className="rounded border border-edge bg-panel px-1.5 py-0.5 text-[11px] text-slate-300 transition-colors hover:bg-edge hover:text-white disabled:opacity-30"
+      className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors disabled:opacity-30 ${
+        active ? 'border-sky-600 bg-sky-600 text-white' : 'border-edge bg-panel text-slate-300 hover:bg-edge hover:text-white'
+      }`}
     >
       {children}
     </button>
@@ -64,6 +86,18 @@ export default function TimeBar({ sim }) {
       {FWD.map(([l, n]) => <Btn key={l} onClick={() => stepMinutes(n)} title={`Forward ${l}`}>+{l}</Btn>)}
       <Btn onClick={toEOD} title="End of day (15:29)">EOD</Btn>
       <Btn onClick={() => dayStep(1)} disabled={di >= sessionDates.length - 1} title="Next trading day">Day »</Btn>
+
+      {/* jump-to-event chips: seek the clock to notable moments (auto-detected, off the clock) */}
+      {events?.length > 0 && (
+        <div className="mt-1 flex w-full flex-wrap items-center gap-1 border-t border-edge/60 pt-1">
+          <span className="mr-1 text-[10px] uppercase tracking-wide text-slate-500">Jump to</span>
+          {events.map((ev) => (
+            <Btn key={ev.key} onClick={() => jumpTo(ev.index)} active={ev.index === clockIndex} title={`${ev.label} — ${fmtDetail(ev)}`}>
+              {ev.label}
+            </Btn>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

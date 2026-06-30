@@ -3,6 +3,7 @@
 // scrubbing back redraws it identically. Uses the app's lightweight-charts v4.
 import { useEffect, useRef } from 'react'
 import { createChart, CrosshairMode } from 'lightweight-charts'
+import { cssVar, chartThemeOptions, onThemeChange } from '../../theme'
 
 const pad = (n) => String(n).padStart(2, '0')
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -22,12 +23,12 @@ export default function EquityCurve({ curve }) {
     const chart = createChart(el, {
       width: el.clientWidth,
       height: el.clientHeight,
-      layout: { background: { color: '#0a0e14' }, textColor: '#8b9bb0', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 10 },
-      grid: { vertLines: { color: 'rgba(40,54,74,0.30)' }, horzLines: { color: 'rgba(40,54,74,0.30)' } },
+      layout: { background: { color: cssVar('--opt-ink', '#0a0e14') }, textColor: cssVar('--opt-muted', '#8b9bb0'), fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 10 },
+      grid: { vertLines: { color: cssVar('--opt-edge', 'rgba(40,54,74,0.30)') }, horzLines: { color: cssVar('--opt-edge', 'rgba(40,54,74,0.30)') } },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: '#1e2a3a' },
+      rightPriceScale: { borderColor: cssVar('--opt-edge', '#1e2a3a') },
       timeScale: {
-        borderColor: '#1e2a3a', timeVisible: true, secondsVisible: false,
+        borderColor: cssVar('--opt-edge', '#1e2a3a'), timeVisible: true, secondsVisible: false,
         tickMarkFormatter: (time, type) => (type <= 2 ? fmtD(time) : fmtT(time)),
       },
       localization: { timeFormatter: (s) => `${fmtD(s)} ${fmtT(s)}`, priceFormatter: (p) => `₹${Math.round(p).toLocaleString('en-IN')}` },
@@ -39,7 +40,8 @@ export default function EquityCurve({ curve }) {
 
     const ro = new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }))
     ro.observe(el)
-    return () => { ro.disconnect(); chart.remove(); chartRef.current = null }
+    const stopTheme = onThemeChange(() => chart.applyOptions(chartThemeOptions()))
+    return () => { ro.disconnect(); stopTheme(); chart.remove(); chartRef.current = null }
   }, [])
 
   useEffect(() => {

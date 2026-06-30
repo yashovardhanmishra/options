@@ -4,6 +4,7 @@ import { getExpiries, getDates, getTimes, getChain } from './api'
 import OptionChain from './components/OptionChain'
 import ChartPanel from './components/ChartPanel'
 import SearchBar from './components/SearchBar'
+import ThemeSwitcher from './components/ThemeSwitcher'
 import Login from './components/Login'
 import SimPage from './sim/ui/SimPage'
 import { authEnabled, supabase, signOut } from './supabase'
@@ -62,6 +63,7 @@ function SpotPage({ userEmail }) {
           ← Options app
         </a>
         <div className="ml-auto flex items-center gap-2">
+          <ThemeSwitcher />
           {authEnabled && userEmail && (
             <span className="hidden max-w-[12rem] truncate text-xs text-slate-400 sm:inline" title={userEmail}>
               {userEmail}
@@ -199,38 +201,39 @@ function Viewer({ userEmail }) {
         <button
           onClick={() => window.open(window.location.pathname + '?view=spot', '_blank', 'noopener')}
           title="Open the Nifty spot index chart in a new tab"
-          className="flex items-center gap-1.5 rounded-md border border-emerald-700/60 bg-emerald-600/15 px-2.5 py-1 text-xs font-medium text-emerald-300 hover:bg-emerald-600/30"
+          className="flex items-center gap-1.5 rounded-md border border-edge bg-panel2 px-2.5 py-1 text-xs font-medium text-slate-300 hover:bg-edge hover:text-slate-100"
         >
-          <span className="text-sm leading-none">📈</span> Nifty Spot
-          <span className="text-[10px] opacity-70">↗</span>
+          Nifty Spot
+          <span className="text-[10px] opacity-60">↗</span>
         </button>
         <button
           onClick={() => window.open(window.location.pathname + '?view=sim', '_blank', 'noopener')}
           title="Open the historical replay simulator in a new tab"
-          className="flex items-center gap-1.5 rounded-md border border-rose-700/60 bg-rose-600/15 px-2.5 py-1 text-xs font-medium text-rose-300 hover:bg-rose-600/30"
+          className="flex items-center gap-1.5 rounded-md border border-edge bg-panel2 px-2.5 py-1 text-xs font-medium text-slate-300 hover:bg-edge hover:text-slate-100"
         >
-          <span className="text-sm leading-none">⏱</span> Replay Sim
-          <span className="text-[10px] opacity-70">↗</span>
+          Replay Sim
+          <span className="text-[10px] opacity-60">↗</span>
         </button>
         <button
           onClick={() => window.open('/stratos', '_blank', 'noopener')}
           title="Open StratosAI — backtest trading strategies in plain English (password protected)"
-          className="flex items-center gap-1.5 rounded-md border border-violet-700/60 bg-violet-600/15 px-2.5 py-1 text-xs font-medium text-violet-300 hover:bg-violet-600/30"
+          className="flex items-center gap-1.5 rounded-md border border-edge bg-panel2 px-2.5 py-1 text-xs font-medium text-slate-300 hover:bg-edge hover:text-slate-100"
         >
-          <span className="text-sm leading-none">🚀</span> Stratos
-          <span className="text-[10px] opacity-70">↗</span>
+          Stratos
+          <span className="text-[10px] opacity-60">↗</span>
         </button>
         {!chainOpen && (
           <button
             onClick={openChain}
             title="Show the option chain"
-            className="flex items-center gap-1.5 rounded-md border border-sky-700/60 bg-sky-600/15 px-2.5 py-1 text-xs font-medium text-sky-300 hover:bg-sky-600/30"
+            className="flex items-center gap-1.5 rounded-md border border-edge bg-panel2 px-2.5 py-1 text-xs font-medium text-slate-300 hover:bg-edge hover:text-slate-100"
           >
-            <span className="text-sm leading-none">▤</span> Option Chain
+            Option Chain
           </button>
         )}
 
         <div className="ml-auto flex items-center gap-3">
+          <ThemeSwitcher />
           <SearchBar onSelect={handleSearchSelect} />
           {authEnabled && (
             <div className="flex items-center gap-2">
