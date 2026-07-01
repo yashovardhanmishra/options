@@ -61,25 +61,29 @@ export default function PositionsPanel({ book, multiplier = 1, setMultiplier, on
                     </td>
                     <td className="px-2 py-1">
                       <div className="flex items-center justify-end gap-0.5">
-                        {/* Partial-exit lot selector: pick how many lots to square off. The −/+
-                            are disabled at the bounds (a 1-lot leg shows both greyed; use ✕). */}
-                        <button
-                          onClick={() => setXL(L.id, Math.max(1, xl - 1))}
-                          disabled={xl <= 1}
-                          title="Fewer lots to exit"
-                          className="flex h-4 w-4 items-center justify-center rounded border border-edge bg-panel2 text-[11px] leading-none text-slate-400 hover:bg-edge hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-panel2 disabled:hover:text-slate-400"
-                        >
-                          −
-                        </button>
-                        <span className="w-5 text-center text-[10px] text-slate-300">{xl}</span>
-                        <button
-                          onClick={() => setXL(L.id, Math.min(L.lots, xl + 1))}
-                          disabled={xl >= L.lots}
-                          title="More lots to exit"
-                          className="flex h-4 w-4 items-center justify-center rounded border border-edge bg-panel2 text-[11px] leading-none text-slate-400 hover:bg-edge hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-panel2 disabled:hover:text-slate-400"
-                        >
-                          +
-                        </button>
+                        {/* Partial-exit lot selector — only shown for multi-lot legs (a 1-lot
+                            leg has nothing to adjust, so it just shows the ✕ to square off). */}
+                        {L.lots > 1 && (
+                          <>
+                            <button
+                              onClick={() => setXL(L.id, Math.max(1, xl - 1))}
+                              disabled={xl <= 1}
+                              title="Fewer lots to exit"
+                              className="flex h-4 w-4 cursor-pointer items-center justify-center rounded border border-edge bg-panel2 text-[11px] leading-none text-slate-400 hover:bg-edge hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-panel2 disabled:hover:text-slate-400"
+                            >
+                              −
+                            </button>
+                            <span className="w-5 text-center text-[10px] text-slate-300">{xl}</span>
+                            <button
+                              onClick={() => setXL(L.id, Math.min(L.lots, xl + 1))}
+                              disabled={xl >= L.lots}
+                              title="More lots to exit"
+                              className="flex h-4 w-4 cursor-pointer items-center justify-center rounded border border-edge bg-panel2 text-[11px] leading-none text-slate-400 hover:bg-edge hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-panel2 disabled:hover:text-slate-400"
+                            >
+                              +
+                            </button>
+                          </>
+                        )}
                         <button
                           onClick={() => onReduceLeg(L.id, xl)}
                           title={xl >= L.lots ? 'Square off this leg' : `Exit ${xl} of ${L.lots} lots`}
