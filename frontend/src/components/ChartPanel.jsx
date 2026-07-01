@@ -688,10 +688,17 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
                 <input
                   type="date"
                   value={replayDate}
+                  min={span ? secToDateStr(span.min) : undefined}
+                  max={span ? secToDateStr(span.max) : undefined}
                   onChange={(e) => setReplayDate(e.target.value)}
-                  title="Replay starts from the nearest available bar on/after this date"
+                  title={span ? `This contract has data ${secToDateStr(span.min)} → ${secToDateStr(span.max)}` : 'Replay start date'}
                   className="rounded border border-edge bg-panel px-2 py-1 text-slate-200 outline-none focus:border-sky-600"
                 />
+                {span && (
+                  <span className="text-[11px] text-slate-500" title="The contract's available data range">
+                    ({secToDateStr(span.min)} → {secToDateStr(span.max)})
+                  </span>
+                )}
               </div>
               <SpeedPicker value={replaySpeed} onChange={setReplaySpeed} />
               <button
