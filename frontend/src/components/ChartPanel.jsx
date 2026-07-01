@@ -412,15 +412,28 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
     setPlaying(false)
   }, [raw, tf, from, to])
 
+  // Seed the replay start date to the instrument's first trading day, so the native picker
+  // OPENS on the data. (An empty value opens on today — an all-disabled month for a contract
+  // that expired weeks ago, which reads as "can't pick a date".) Keep the user's own pick if
+  // it still falls within the new instrument's range.
+  useEffect(() => {
+    if (raw.length === 0) return setReplayDate('')
+    const lo = secToDateStr(raw[0].time)
+    const hi = secToDateStr(raw[raw.length - 1].time)
+    setReplayDate((d) => (d && d >= lo && d <= hi ? d : lo))
+  }, [raw])
+
   const startReplay = () => {
     const n = fullSeries.length
     if (n < 2) return
-    // Default to ~40% in so there's history to the left; jump to the chosen date if given.
+    // Default to ~40% in so there's history to the left; jump to the chosen date if given,
+    // clamping to the nearest available bar (a date before/after the data -> first/last bar,
+    // never a silent fallback).
     let start = Math.floor(n * 0.4)
     if (replayDate) {
       const sec = dateStrToSec(replayDate)
       const idx = fullSeries.findIndex((c) => c.time >= sec)
-      if (idx >= 0) start = idx
+      start = idx >= 0 ? idx : n - 1 // date past the data -> last bar
     }
     start = Math.max(1, Math.min(start, n - 1))
     // Preserve the user's current zoom as the replay window width.
@@ -675,9 +688,8 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
                 <input
                   type="date"
                   value={replayDate}
-                  min={span ? secToDateStr(span.min) : undefined}
-                  max={span ? secToDateStr(span.max) : undefined}
                   onChange={(e) => setReplayDate(e.target.value)}
+                  title="Replay starts from the nearest available bar on/after this date"
                   className="rounded border border-edge bg-panel px-2 py-1 text-slate-200 outline-none focus:border-sky-600"
                 />
               </div>
