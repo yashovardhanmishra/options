@@ -28,6 +28,16 @@ const fmtTimeUTC = (sec) => {
   const x = new Date(sec * 1000)
   return `${pad(x.getUTCHours())}:${pad(x.getUTCMinutes())}`
 }
+// Up to this many trading days, the replay picker is a plain day-dropdown (options); beyond
+// it (the multi-year spot index) it falls back to a native calendar.
+const REPLAY_DAY_DROPDOWN_MAX = 90
+// "YYYY-MM-DD" -> "Tue, 13 May 2026" for the replay-day dropdown.
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const fmtReplayDate = (d) => {
+  const [y, m, dd] = d.split('-').map(Number)
+  const wd = DOW[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()]
+  return `${wd}, ${dd} ${MONTHS[m - 1]} ${y}`
+}
 
 function expiryLabel(iso) {
   try {
@@ -185,6 +195,21 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
     const windowed = filterByRange(raw, fromSec, toSec)
     return resample(windowed, tf)
   }, [raw, tf, from, to])
+  // Distinct trading days in the CURRENT resampled/filtered series (fullSeries) — the replay
+  // start-day dropdown for a short-lived contract (an option), so every listed day is one that
+  // actually has bars the replay can start on. (Deriving from `raw` could list a day that
+  // resampling/filtering dropped, which would then silently fall back to the last bar.) Spot
+  // has hundreds of days -> it keeps the native calendar instead; see REPLAY_DAY_DROPDOWN_MAX.
+  const replayDays = useMemo(() => {
+    const seen = new Set()
+    const out = []
+    for (const c of fullSeries) {
+      const d = secToDateStr(c.time)
+      if (!seen.has(d)) { seen.add(d); out.push(d) }
+    }
+    return out
+  }, [fullSeries])
+
   // During bar replay, reveal only the first `replayCount` bars (one more per tick) so
   // candles + every indicator/pattern (all derived from this `series`) play forward together.
   const series = useMemo(
@@ -412,16 +437,13 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
     setPlaying(false)
   }, [raw, tf, from, to])
 
-  // Seed the replay start date to the instrument's first trading day, so the native picker
-  // OPENS on the data. (An empty value opens on today — an all-disabled month for a contract
-  // that expired weeks ago, which reads as "can't pick a date".) Keep the user's own pick if
-  // it still falls within the new instrument's range.
+  // Seed the replay start day to the first available trading day, so the picker OPENS on the
+  // data. (An empty value would open the native calendar on today — an all-disabled month for a
+  // contract that expired weeks ago, reading as "can't pick a date".) Keep the user's own pick
+  // only if it's still one of the available days, so the <select> value is always a real option.
   useEffect(() => {
-    if (raw.length === 0) return setReplayDate('')
-    const lo = secToDateStr(raw[0].time)
-    const hi = secToDateStr(raw[raw.length - 1].time)
-    setReplayDate((d) => (d && d >= lo && d <= hi ? d : lo))
-  }, [raw])
+    setReplayDate((d) => (d && replayDays.includes(d) ? d : replayDays[0] || ''))
+  }, [replayDays])
 
   const startReplay = () => {
     const n = fullSeries.length
@@ -436,6 +458,10 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
       start = idx >= 0 ? idx : n - 1 // date past the data -> last bar
     }
     start = Math.max(1, Math.min(start, n - 1))
+    // Reflect the bar we actually landed on back into the picker, so a weekend/holiday pick on
+    // the spot calendar (which maps to the next trading day) never disagrees with the UI.
+    const actualDay = secToDateStr(fullSeries[start].time)
+    if (actualDay !== replayDate) setReplayDate(actualDay)
     // Preserve the user's current zoom as the replay window width.
     try {
       const r = chartRef.current?.timeScale().getVisibleLogicalRange()
@@ -684,20 +710,31 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
             <>
               <span className="font-semibold text-sky-300">Bar Replay</span>
               <div className="flex items-center gap-1.5 text-slate-400">
-                <span>Start date</span>
-                <input
-                  type="date"
-                  value={replayDate}
-                  min={span ? secToDateStr(span.min) : undefined}
-                  max={span ? secToDateStr(span.max) : undefined}
-                  onChange={(e) => setReplayDate(e.target.value)}
-                  title={span ? `This contract has data ${secToDateStr(span.min)} → ${secToDateStr(span.max)}` : 'Replay start date'}
-                  className="rounded border border-edge bg-panel px-2 py-1 text-slate-200 outline-none focus:border-sky-600"
-                />
-                {span && (
-                  <span className="text-[11px] text-slate-500" title="The contract's available data range">
-                    ({secToDateStr(span.min)} → {secToDateStr(span.max)})
-                  </span>
+                <span>Start day</span>
+                {replayDays.length > 0 && replayDays.length <= REPLAY_DAY_DROPDOWN_MAX ? (
+                  // Short-lived contract (an option): a dropdown of the days it actually
+                  // traded, so every choice is valid — no calendar to wander into empty years.
+                  <select
+                    value={replayDate}
+                    onChange={(e) => setReplayDate(e.target.value)}
+                    title="Replay starts on this day (only days this contract traded are listed)"
+                    className="rounded border border-edge bg-panel px-2 py-1 font-mono text-slate-200 outline-none focus:border-sky-600"
+                  >
+                    {replayDays.map((d) => (
+                      <option key={d} value={d}>{fmtReplayDate(d)}</option>
+                    ))}
+                  </select>
+                ) : (
+                  // Long history (the spot index): a native calendar bounded to the data.
+                  <input
+                    type="date"
+                    value={replayDate}
+                    min={span ? secToDateStr(span.min) : undefined}
+                    max={span ? secToDateStr(span.max) : undefined}
+                    onChange={(e) => setReplayDate(e.target.value)}
+                    title="Replay start date"
+                    className="rounded border border-edge bg-panel px-2 py-1 text-slate-200 outline-none focus:border-sky-600"
+                  />
                 )}
               </div>
               <SpeedPicker value={replaySpeed} onChange={setReplaySpeed} />
