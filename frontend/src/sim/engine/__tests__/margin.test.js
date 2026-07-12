@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { legMargin, bookMargin, previewMargin, suggestLots, SPAN_PCT, EXPOSURE_PCT } from '../margin.js'
+import { legMargin, bookMargin, previewMargin, suggestLots, spanPctFor, SPAN_PCT, EXPOSURE_PCT, SPAN_MIN_PCT, SPAN_MAX_PCT } from '../margin.js'
 
 const env = { spot: 23000, lotSize: 75, mult: 1 }
 const notional = 23000 * 75
@@ -18,6 +18,43 @@ describe('legMargin', () => {
   it('SPAN is floored at the option premium for deep-ITM shorts', () => {
     const m = legMargin({ side: -1, lots: 1 }, { ...env, price: 4000 })
     expect(m.span).toBe(4000 * 75)
+  })
+})
+
+describe('moneyness-aware SPAN (the strike drives margin, not the premium collected)', () => {
+  const spot = 23609.3
+  const notional = spot * 65
+  const shortPE = (strike, price) =>
+    bookMargin(
+      { openLegs: [{ leg: { side: -1, lots: 1, type: 'PE', strike }, lotSize: 65, priceNow: price }] },
+      { maxLoss: -Infinity },
+      { spot, lotSize: 65 },
+    )
+
+  it('spanPctFor: ATM = SPAN_PCT, OTM floored at min, ITM capped at max, no-strike = ATM', () => {
+    expect(spanPctFor('PE', 23609.3, spot)).toBeCloseTo(SPAN_PCT, 4) // ATM
+    expect(spanPctFor('PE', 21200, spot)).toBe(SPAN_MIN_PCT) // ~10% OTM → 3% floor
+    expect(spanPctFor('PE', 30000, spot)).toBe(SPAN_MAX_PCT) // deep ITM → 9% cap
+    expect(spanPctFor('PE', 23850, spot)).toBeGreaterThan(SPAN_PCT) // 1% ITM → above ATM
+    expect(spanPctFor('CE', 23850, spot)).toBeLessThan(SPAN_PCT) // OTM call → below ATM
+    expect(spanPctFor('PE', undefined, spot)).toBe(SPAN_PCT) // no strike → ATM (back-compat)
+  })
+
+  // The user's three screenshots — all printed ₹99,749 under the old flat model.
+  it('deep-OTM 21200PE @0.45 → floored ~₹76,730, cheaper than the ATM ₹99,749', () => {
+    const m = shortPE(21200, 0.45)
+    expect(m.span).toBeCloseTo(SPAN_MIN_PCT * notional, 0) // ~46,038 (min charge, not the ₹29 premium)
+    expect(m.total).toBeCloseTo((SPAN_MIN_PCT + EXPOSURE_PCT) * notional, 0) // ~76,730
+    expect(m.total).toBeLessThan(99_749)
+  })
+
+  it('near-ATM 23600PE ≈ the ₹99,749 anchor (essentially unchanged)', () => {
+    // 23600 is ~9 pts below spot → marginally OTM → ₹99,447, within ~₹300 of the pure-ATM ₹99,749.
+    expect(shortPE(23600, 80.9).total).toBeCloseTo((SPAN_PCT + EXPOSURE_PCT) * notional, -3)
+  })
+
+  it('ITM 23850PE → dearer than the ATM ₹99,749', () => {
+    expect(shortPE(23850, 226.1).total).toBeGreaterThan(99_749)
   })
 })
 

@@ -2,31 +2,48 @@
 // PURE — mirrors engine/risk.js, no I/O, no React, unit-testable.
 //
 // Real SPAN is a scenario grid the exchange revises ~6×/day; we approximate it as a % of
-// NOTIONAL (underlying value = spot × lot size). Calibration: selling one NIFTY lot currently
-// needs ≈ ₹1.1–1.2 lakh against ≈ ₹18–19 lakh notional (NIFTY ~25,000 × 75) → total
-// SPAN+exposure ≈ 6.5%; exposure is 2%, so SPAN ≈ 4.5%. SPAN also NETS offsetting short
-// sides: a big up-move hurts short calls while helping short puts (and vice-versa), so the
-// binding scenario for a short straddle/strangle is the larger side plus a fraction of the
-// other (gamma/pin risk) — NOT the naive 2× sum. Long options need only the premium paid.
-// A fully-hedged, defined-risk group is capped at its payoff max-loss (the broker's hedge
-// benefit). These numbers are ESTIMATES; the UI labels them as such.
+// NOTIONAL (underlying value = spot × lot size) that VARIES WITH MONEYNESS. Calibration: selling
+// one ATM NIFTY lot currently needs ≈ ₹1.1–1.2 lakh against ≈ ₹18–19 lakh notional (NIFTY
+// ~25,000 × 75) → total SPAN+exposure ≈ 6.5%; exposure is 2%, so ATM SPAN ≈ 4.5%.
+//   • ITM shorts cost MORE  — delta → 1, so a bigger adverse-move scenario loss; SPAN rate rises
+//     with ITM depth (SPAN_ITM_SLOPE), capped at SPAN_MAX_PCT (past which the premium floor wins).
+//   • OTM shorts cost LESS — smaller scenario loss, but never below NSE's short-option MINIMUM
+//     charge (SPAN_MIN_PCT). This is why selling a ₹0.45 deep-OTM option STILL blocks ~₹75k: the
+//     exchange margins the tail/gap risk of the underlying, not the tiny premium you collect.
+// SPAN also NETS offsetting short sides: a big up-move hurts short calls while helping short puts
+// (and vice-versa), so a short straddle/strangle's binding scenario is the larger side plus a
+// fraction of the other (gamma/pin risk) — NOT the naive 2× sum (netted at the SPAN level so each
+// leg keeps its own moneyness rate). Long options need only the premium paid. A fully-hedged,
+// defined-risk group is capped at its payoff max-loss. These numbers are ESTIMATES.
 //
-// Sources: NSE Clearing margins; Zerodha/5paisa "SPAN & exposure margin" notes (exposure =
-// 2% of contract value for index option selling; hedged spreads charged ≈ their max loss).
+// Sources: NSE Clearing margins (incl. the short-option minimum charge); Zerodha/5paisa "SPAN &
+// exposure margin" notes (exposure = 2% of contract value; hedged spreads charged ≈ their max loss).
 
-export const SPAN_PCT = 0.045 // SPAN ≈ 4.5% of notional for a short index option
+export const SPAN_PCT = 0.045 // ATM SPAN ≈ 4.5% of notional for a short index option
 export const EXPOSURE_PCT = 0.02 // NSE exposure margin = 2% of contract notional
+export const SPAN_MIN_PCT = 0.03 // short-option MINIMUM charge — a deep-OTM short never below 3%
+export const SPAN_MAX_PCT = 0.09 // deep-ITM cap on the SPAN rate (premium floor dominates beyond)
+export const SPAN_ITM_SLOPE = 0.5 // SPAN-rate change per unit of signed ITM fraction (ITM up / OTM down)
 export const SPAN_OFFSET = 0.5 // share of the offsetting short side that still adds SPAN
 
 const qtyOf = (leg, lotSize, mult) => Math.abs(leg.lots || 0) * (lotSize || 0) * (mult || 1)
 
+/** Moneyness-aware SPAN rate for a short option: ATM = SPAN_PCT, rising with ITM depth (capped at
+ *  SPAN_MAX_PCT) and falling for OTM but floored at the short-option minimum (SPAN_MIN_PCT).
+ *  `itm` = signed ITM fraction of spot (PE ITM when strike > spot; CE ITM when spot > strike).
+ *  No strike (or no spot) → ATM rate, so legs/tests without a strike are unchanged. */
+export function spanPctFor(optType, strike, spot) {
+  if (!(strike > 0) || !(spot > 0)) return SPAN_PCT
+  const itm = (optType === 'PE' ? strike - spot : spot - strike) / spot
+  return Math.min(SPAN_MAX_PCT, Math.max(SPAN_MIN_PCT, SPAN_PCT + SPAN_ITM_SLOPE * itm))
+}
+
 /**
  * Per-leg breakdown.
  *   LONG  (side>0): margin = premium paid (no SPAN/exposure).
- *   SHORT (side<0): exposure = 2% of spot notional; standalone SPAN = SPAN_PCT × notional,
- *                   floored at the option's own premium (deep-ITM shorts). The PORTFOLIO SPAN
- *                   is recomputed with directional netting in aggregate() — the per-leg `span`
- *                   here is the single-leg figure (used standalone / for the breakdown).
+ *   SHORT (side<0): exposure = 2% of spot notional; standalone SPAN = spanPctFor(moneyness) ×
+ *                   notional, floored at the option's own premium (deep-ITM shorts). The PORTFOLIO
+ *                   SPAN nets the two directional sides in aggregate() from these per-leg spans.
  * @returns { type:'long'|'short', optType, premium, notional, span, exposure, margin }
  */
 export function legMargin(leg, { spot = 0, lotSize = 0, mult = 1, price } = {}) {
@@ -37,7 +54,7 @@ export function legMargin(leg, { spot = 0, lotSize = 0, mult = 1, price } = {}) 
     return { type: 'long', optType: leg.type, premium, notional: 0, span: 0, exposure: 0, margin: premium }
   }
   const notional = spot * qty
-  const span = Math.max(SPAN_PCT * notional, premium) // floor at the option's own premium
+  const span = Math.max(spanPctFor(leg.type, leg.strike, spot) * notional, premium) // floor at own premium
   const exposure = EXPOSURE_PCT * notional
   return { type: 'short', optType: leg.type, premium, notional, span, exposure, margin: span + exposure }
 }
@@ -49,8 +66,8 @@ function aggregate(legMargins, payoff) {
   let premium = 0,
     exposure = 0,
     shortPrem = 0,
-    shortCallNotional = 0,
-    shortPutNotional = 0,
+    shortCallSpan = 0,
+    shortPutSpan = 0,
     hasLong = false,
     hasShort = false
   for (const m of legMargins) {
@@ -61,15 +78,17 @@ function aggregate(legMargins, payoff) {
       exposure += m.exposure
       shortPrem += m.premium
       hasShort = true
-      if (m.optType === 'PE') shortPutNotional += m.notional
-      else shortCallNotional += m.notional
+      // m.span is already the per-leg, moneyness-aware, premium-floored SPAN (see legMargin).
+      if (m.optType === 'PE') shortPutSpan += m.span
+      else shortCallSpan += m.span
     }
   }
-  // The worse directional side drives SPAN in full; the offsetting side adds a fraction.
-  // Single naked short → exactly one side. Floor at total short premium.
-  const hi = Math.max(shortCallNotional, shortPutNotional)
-  const lo = Math.min(shortCallNotional, shortPutNotional)
-  const span = hasShort ? Math.max(SPAN_PCT * (hi + SPAN_OFFSET * lo), shortPrem) : 0
+  // The worse directional side drives SPAN in full; the offsetting side adds a fraction (gamma/pin).
+  // Netted at the SPAN level so each leg keeps its own moneyness rate. Single naked short → one
+  // side. Floor at total short premium.
+  const hi = Math.max(shortCallSpan, shortPutSpan)
+  const lo = Math.min(shortCallSpan, shortPutSpan)
+  const span = hasShort ? Math.max(hi + SPAN_OFFSET * lo, shortPrem) : 0
   const gross = span + exposure + premium
 
   const defined = payoff != null && payoff.maxLoss !== -Infinity && hasLong && hasShort

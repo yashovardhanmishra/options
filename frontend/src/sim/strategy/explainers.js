@@ -77,7 +77,7 @@ export const EXPLAINERS = {
   },
   spanMargin: {
     t: 'SPAN margin',
-    d: 'The exchange’s worst-case risk margin on your short options (~4.5% of underlying value here), netted across offsetting call/put sides. It’s the bulk of what selling an option costs you.',
+    d: 'The exchange’s worst-case risk margin on your short options — ~4.5% of underlying value at the money, higher for ITM strikes and lower for OTM (floored at a ~3% minimum, so even a near-worthless deep-OTM short still costs plenty), netted across offsetting call/put sides. It’s the bulk of what selling an option costs you.',
   },
   exposureMargin: {
     t: 'Exposure margin',
