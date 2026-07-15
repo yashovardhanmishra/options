@@ -35,23 +35,36 @@ SELECT * FROM (
     CAST(epoch(ts) AS BIGINT)  AS unix,
     strftime(ts, '%Y-%m-%d')   AS date,
     strftime(ts, '%H:%M')      AS hm,
-    open, high, low, close, volume, oi
+    open, high, low, close, volume, oi,
+    filename
   FROM (
     SELECT
       filename,
-      strptime("Date" || ' ' || "Time", '%d/%m/%Y %H:%M:%S') AS ts,
-      "Open" AS open, "High" AS high, "Low" AS low, "Close" AS close,
-      "Volume" AS volume, "Open Interest" AS oi
+      -- try_strptime: a malformed Date/Time yields a NULL ts (dropped below), never an abort
+      try_strptime("Date" || ' ' || "Time", '%d/%m/%Y %H:%M:%S') AS ts,
+      TRY_CAST("Open" AS DOUBLE)  AS open,  TRY_CAST("High" AS DOUBLE) AS high,
+      TRY_CAST("Low" AS DOUBLE)   AS low,   TRY_CAST("Close" AS DOUBLE) AS close,
+      -- volume/OI: NULL means "not reported" for index-style data — store 0, the same
+      -- convention as the server's CSV fallback (fillna(0)); the API float()s these.
+      COALESCE(TRY_CAST("Volume" AS DOUBLE), 0)        AS volume,
+      COALESCE(TRY_CAST("Open Interest" AS DOUBLE), 0) AS oi
+    -- union_by_name binds columns by their HEADER NAMES, not position — the old
+    -- `columns = {...}` override made DuckDB skip the header and bind positionally,
+    -- silently swapping fields (volume<->OI etc.) for any file with a different
+    -- column order. all_varchar + explicit TRY_CASTs keep the typing deterministic.
     FROM read_csv('__GLOB__', filename = true, header = true, ignore_errors = true,
-         columns = {
-           'Date': 'VARCHAR', 'Time': 'VARCHAR', 'Open': 'DOUBLE', 'High': 'DOUBLE',
-           'Low': 'DOUBLE', 'Close': 'DOUBLE', 'Volume': 'DOUBLE', 'Open Interest': 'DOUBLE'
-         })
-    WHERE ts IS NOT NULL AND "Close" IS NOT NULL
+         store_rejects = true, union_by_name = true, all_varchar = true)
   )
+  -- OHLC must be complete (the API float()s them — a NULL crashed /api/chart in DB mode);
+  -- rows the CSV fallback would dropna are dropped here too, so both modes agree.
+  WHERE ts IS NOT NULL AND open IS NOT NULL AND high IS NOT NULL
+    AND low IS NOT NULL AND close IS NOT NULL
 )
 -- drop any file whose name isn't <expiry>_<strike><CE|PE>.csv
 WHERE strike IS NOT NULL AND type IN ('CE', 'PE') AND expiry <> ''
+-- keep exactly ONE row per instrument-minute (lightweight-charts needs strictly-ascending
+-- unique times; the CSV fallback drop_duplicates(keep="last") for the same reason)
+QUALIFY row_number() OVER (PARTITION BY expiry, strike, type, unix ORDER BY filename DESC) = 1
 ORDER BY expiry
 """
 
@@ -83,6 +96,17 @@ def main():
     rows = con.execute("SELECT count(*) FROM bars").fetchone()[0]
     exps = con.execute("SELECT count(*) FROM (SELECT DISTINCT expiry FROM dim_instruments)").fetchone()[0]
     insts = con.execute("SELECT count(*) FROM dim_instruments").fetchone()[0]
+    # store_rejects=true collects rows read_csv could not parse — surface the count so a bad
+    # vendor batch is visible in the ingest log instead of silently shrinking `bars rows`.
+    try:
+        rejects = con.execute("SELECT count(*) FROM reject_errors").fetchone()[0]
+    except Exception:
+        rejects = None
+    if rejects:
+        top = con.execute(
+            "SELECT error_message, count(*) AS n FROM reject_errors GROUP BY 1 ORDER BY n DESC LIMIT 3"
+        ).fetchall()
+        print(f"  REJECTED rows: {rejects:,} (malformed — not ingested); top causes: {top}")
     con.execute("CHECKPOINT")
     con.close()
 

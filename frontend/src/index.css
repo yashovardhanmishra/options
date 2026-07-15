@@ -418,3 +418,16 @@ h1 {
   --opt-accent: #e0334f; --opt-call: #5e9bb5; --opt-put: #e0894f; --opt-pos: #4ade80; --opt-neg: #f0808f; --opt-warn: #d6a44e;
   --opt-scroll-track: #161412; --opt-scroll-thumb: #363029; --opt-scroll-thumb-hover: #463f36;
 }
+
+/* ── Brand logo mark — flat eagle silhouette (public/logo-mask.png) recolored + glowed
+   per light/dark mode via CSS mask. Dark = white + white glow; light = deep indigo + dark glow. ── */
+:root { --brand-mark-fill: #ffffff; --brand-mark-glow: rgba(203, 216, 255, 0.55); }
+:root[data-mode="light"] { --brand-mark-fill: #1e1b4b; --brand-mark-glow: rgba(30, 27, 75, 0.34); }
+.brand-mark {
+  display: inline-block;
+  aspect-ratio: 586 / 334;
+  background-color: var(--brand-mark-fill);
+  -webkit-mask: url("/logo-mask.png") center / contain no-repeat;
+          mask: url("/logo-mask.png") center / contain no-repeat;
+  filter: drop-shadow(0 0 4px var(--brand-mark-glow)) drop-shadow(0 0 10px var(--brand-mark-glow));
+}

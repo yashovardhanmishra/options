@@ -16,6 +16,13 @@ const inScope = (leg, scope) =>
 export function foldActions(actions, t, lotSizeFor) {
   const state = { legs: new Map(), realized: 0, realizedByLeg: new Map(), realizedByGroup: new Map(), events: [] }
 
+  // Fold in CLOCK order, not append order. The UI allows trading after scrubbing BACK, so the
+  // log can hold an action whose t is earlier than ones already appended — replaying append-order
+  // then applies the STALE later action after the earlier one (e.g. a scrub-back exit at t=200 is
+  // silently overridden by a pre-existing exit at t=500 once the clock crosses 500). sort() is
+  // stable, so same-t actions keep their fire order (roll/exit atomicity is preserved).
+  actions = [...actions].sort((a, b) => a.t - b.t)
+
   const realize = (leg, pnl) => {
     state.realized += pnl
     state.realizedByLeg.set(leg.id, (state.realizedByLeg.get(leg.id) || 0) + pnl)

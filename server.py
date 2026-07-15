@@ -114,7 +114,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 async def _require_auth(request: Request, call_next):
     """Require a valid Supabase (Google) token on data endpoints when AUTH_ENABLED."""
     path = request.url.path
-    if AUTH_ENABLED and request.method != "OPTIONS" and path.startswith("/api/"):
+    if AUTH_ENABLED and request.method != "OPTIONS" and (path == "/api" or path.startswith("/api/")):
         header = request.headers.get("authorization", "")
         token = header[7:] if header[:7].lower() == "bearer " else ""
         try:
@@ -299,7 +299,7 @@ def find_expiry_dir(expiry: str) -> Path:
 # --------------------------------------------------------------------------- #
 # CSV parsing (cached by path + mtime so re-reads are cheap)
 # --------------------------------------------------------------------------- #
-@lru_cache(maxsize=2048)
+@lru_cache(maxsize=64)
 def _parse_csv(path_str: str, _mtime: float) -> pd.DataFrame:
     df = pd.read_csv(path_str)
     df.columns = [c.strip() for c in df.columns]
@@ -451,6 +451,8 @@ def chain(
     only one side get a null on the missing side.
     """
     hm = _norm_hm(time) if time else None
+    if time and hm is None:
+        raise HTTPException(400, f"Invalid time {time!r}; expected HH:MM")
     if USING_DB:
         return _db_chain(expiry, date, hm)
     folder = find_expiry_dir(expiry)
@@ -498,7 +500,11 @@ def chart(expiry: str = Query(...), strike: int = Query(...), type: str = Query(
         return _db_chart(expiry, strike, side)
 
     folder = find_expiry_dir(expiry)
-    matches = list(folder.glob(f"*_{strike}{side}.csv"))
+    # Filenames may use lowercase ce/pe (FILE_RE is IGNORECASE), so match both cases.
+    matches = [
+        f for f in folder.glob("*.csv")
+        if (m := FILE_RE.search(f.name)) and int(m.group(1)) == strike and m.group(2).upper() == side
+    ]
     if not matches:
         raise HTTPException(404, f"No data for {strike}{side} in {expiry}")
 

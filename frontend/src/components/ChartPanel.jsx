@@ -7,6 +7,7 @@ import {
   filterByRange,
   dateStrToSec,
   secToDateStr,
+  tfToSeconds,
   TIMEFRAMES,
 } from '../utils/resample'
 import { INDICATORS, defaultParams } from '../utils/indicators'
@@ -69,7 +70,7 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
   const prevReplayOnRef = useRef(false)
 
   const [raw, setRaw] = useState([])
-  const [tf, setTf] = useState(spot ? '15m' : '5m')
+  const [tf, setTf] = useState(spot ? '15m' : '1m')
   const [customTf, setCustomTf] = useState('') // value of the custom-minutes box
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
@@ -218,6 +219,14 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
     [fullSeries, replayOn, replayCount],
   )
   seriesRef.current = series
+
+  // time -> index in `series`, so the OHLC readout can show the change vs the
+  // previous bar's close (TradingView-style) in O(1) on hover/replay.
+  const idxByTime = useMemo(() => {
+    const m = new Map()
+    for (let i = 0; i < series.length; i++) m.set(series[i].time, i)
+    return m
+  }, [series])
 
   // Push the current series into the (already created) chart series.
   const paint = () => {
@@ -470,7 +479,8 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
       replayWinRef.current = 150
     }
     setReplayOn(true)
-    setReplayCount(start)
+    // `start` is the landed bar's index; count = index + 1 so that bar itself is revealed.
+    setReplayCount(Math.min(start + 1, n))
     setPlaying(true)
   }
   const exitReplay = () => {
@@ -902,51 +912,67 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
           </div>
         )}
 
-        {/* Crosshair tooltip */}
-        {tip && (
-          <div
-            className="pointer-events-none absolute z-20 w-56 rounded-md border border-edge bg-panel2/95 px-2.5 py-2 text-[11px] shadow-xl shadow-black/50 backdrop-blur"
-            style={{
-              left: Math.min(tip.x + 16, (wrapRef.current?.clientWidth || 0) - 236),
-              top: Math.max(
-                8,
-                Math.min(tip.y + 16, (wrapRef.current?.clientHeight || 0) - (160 + (tip.inds?.length || 0) * 16)),
-              ),
-            }}
-          >
-            <div className="mb-1 flex justify-between text-slate-400">
-              <span>{fmtDateUTC(tip.c.time)}</span>
-              <span>{fmtTimeUTC(tip.c.time)}</span>
+        {/* OHLC readout — TradingView-style single inline line, pinned top-right INSIDE the
+            chart box (offset to clear the ~80px price axis), borderless with a text-shadow so
+            it reads over candles. Defaults to the latest bar (the last REVEALED bar during
+            replay, since `series` is already sliced to replayCount); follows the crosshair on
+            hover and then also shows that bar's indicator values. */}
+        {(() => {
+          const c = tip?.c ?? (series.length ? series[series.length - 1] : null)
+          if (!c) return null
+          const inds = tip?.inds ?? []
+          const idx = idxByTime.get(c.time)
+          const prev = idx != null && idx > 0 ? series[idx - 1] : null
+          const base = prev ? prev.close : c.open // change vs previous close (fallback: this bar's open)
+          const chg = c.close - base
+          const pct = base ? (chg / base) * 100 : 0
+          const sign = (n) => (n >= 0 ? '+' : '')
+          const green = 'text-green-400'
+          const red = 'text-red-400'
+          // A bar's `time` is its bucket START; on any aggregated intraday timeframe its
+          // CLOSE (C) is the price at the bucket's END, not at the label minute. Show the
+          // full span (e.g. 09:45–09:50) so the readout can't be misread as a 09:45 print —
+          // this is exactly why the 5m "09:45" close (135.65) differs from the option
+          // chain's 1-min 09:45 LTP (118.55). Clamp the end to the 15:30 session close so a
+          // folded last bar never labels past the session.
+          const stepSec = tfToSeconds(tf)
+          let spanEndSec = null
+          if (stepSec > 60 && stepSec < 86400) {
+            const sessionClose = Math.floor(c.time / 86400) * 86400 + 15 * 3600 + 30 * 60
+            spanEndSec = Math.min(c.time + stepSec, sessionClose)
+          }
+          return (
+            <div className="pointer-events-none absolute right-[84px] top-2 z-20 flex max-w-[calc(100%-96px)] flex-col items-end gap-y-0.5 font-mono text-[11px] leading-tight tabular-nums [text-shadow:0_1px_4px_rgba(0,0,0,0.95)]">
+              <span className="text-[10px] text-slate-400">
+                {fmtDateUTC(c.time)} {fmtTimeUTC(c.time)}
+                {spanEndSec != null && (
+                  <span className="text-slate-500">–{fmtTimeUTC(spanEndSec)}</span>
+                )}
+              </span>
+              <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5">
+                <span className="text-slate-500">O <span className="text-slate-200">{c.open.toFixed(2)}</span></span>
+                <span className="text-slate-500">H <span className={green}>{c.high.toFixed(2)}</span></span>
+                <span className="text-slate-500">L <span className={red}>{c.low.toFixed(2)}</span></span>
+                <span className="text-slate-500">C <span className={c.close >= c.open ? green : red}>{c.close.toFixed(2)}</span></span>
+                <span className={chg >= 0 ? green : red}>
+                  {sign(chg)}{chg.toFixed(2)} ({sign(chg)}{pct.toFixed(2)}%)
+                </span>
+                <span className="text-slate-500">Vol <span className={spot ? 'text-sky-300' : 'text-slate-200'}>{compact.format(c.volume)}</span></span>
+                {!spot && <span className="text-slate-500">OI <span className="text-yellow-400">{compact.format(c.oi)}</span></span>}
+              </div>
+              {inds.length > 0 && (
+                <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5">
+                  {inds.map((ind, i) => (
+                    <span key={i} className="flex items-center gap-1 whitespace-nowrap">
+                      <span style={{ color: ind.color }}>{ind.label}</span>
+                      <span className="text-slate-200">{ind.values.map((v) => (v == null ? '–' : fmtVal(v))).join(' ')}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
-            <Row label="O" value={tip.c.open.toFixed(2)} />
-            <Row label="H" value={tip.c.high.toFixed(2)} cls="text-green-400" />
-            <Row label="L" value={tip.c.low.toFixed(2)} cls="text-red-400" />
-            <Row
-              label="C"
-              value={tip.c.close.toFixed(2)}
-              cls={tip.c.close >= tip.c.open ? 'text-green-400' : 'text-red-400'}
-            />
-            <div className="my-1 border-t border-edge" />
-            <Row label="Vol" value={compact.format(tip.c.volume)} cls={spot ? 'text-sky-300' : 'text-slate-200'} />
-            {!spot && <Row label="OI" value={compact.format(tip.c.oi)} cls="text-yellow-400" />}
-
-            {tip.inds && tip.inds.length > 0 && (
-              <>
-                <div className="my-1 border-t border-edge" />
-                {tip.inds.map((ind, i) => (
-                  <div key={i} className="flex justify-between gap-3 font-mono tabular-nums">
-                    <span className="truncate" style={{ color: ind.color }}>
-                      {ind.label}
-                    </span>
-                    <span className="shrink-0 text-slate-200">
-                      {ind.values.map((v) => (v == null ? '–' : fmtVal(v))).join('  ')}
-                    </span>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        )}
+          )
+        })()}
       </div>
 
       {codeView && (
@@ -961,15 +987,6 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
           onClose={() => setCodeView(null)}
         />
       )}
-    </div>
-  )
-}
-
-function Row({ label, value, cls = 'text-slate-200' }) {
-  return (
-    <div className="flex justify-between font-mono tabular-nums">
-      <span className="text-slate-500">{label}</span>
-      <span className={cls}>{value}</span>
     </div>
   )
 }

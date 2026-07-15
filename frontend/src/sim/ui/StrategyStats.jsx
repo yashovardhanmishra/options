@@ -17,15 +17,22 @@ export default function StrategyStats({ payoff, book, spot }) {
   const pnl = book?.total ?? 0
   const credit = payoff?.netCredit ?? 0
   const fmtBig = (v) => (v === Infinity ? 'Unlimited' : v === -Infinity ? 'Unlimited' : money(v))
+  // The live P&L is marked at REAL option prices (time value included); Max Profit/Loss are the
+  // AT-EXPIRY (intrinsic) extremes. A net-long-time-value position's live MTM can sit just ABOVE the
+  // expiry max (a short-vega one just below the expiry min) — and you can always close NOW to lock the
+  // current P&L — so widen the displayed extremes to include it. Else "P&L > Max Profit" reads as
+  // impossible even though it's a real live-vs-expiry valuation gap (amplified by very high IV).
+  const maxProfit = payoff ? Math.max(payoff.maxProfit, pnl) : null
+  const maxLoss = payoff ? Math.min(payoff.maxLoss, pnl) : null
 
   return (
     <div className="flex flex-wrap items-center gap-x-1 gap-y-0 border-b border-edge bg-panel">
       <Cell label="P&L" infoKey="pnl"><span className={pnlCls(pnl)}>{money(pnl)}</span></Cell>
       <Cell label="Max Profit" infoKey="maxProfit">
-        <span className="text-emerald-400">{payoff ? fmtBig(payoff.maxProfit) : '—'}</span>
+        <span className="text-emerald-400">{maxProfit != null ? fmtBig(maxProfit) : '—'}</span>
       </Cell>
       <Cell label="Max Loss" infoKey="maxLoss">
-        <span className="text-red-400">{payoff ? (payoff.maxLoss === -Infinity ? 'Unlimited' : money(payoff.maxLoss)) : '—'}</span>
+        <span className="text-red-400">{maxLoss != null ? (maxLoss === -Infinity ? 'Unlimited' : money(maxLoss)) : '—'}</span>
       </Cell>
       <Cell label="POP" infoKey="pop">
         <span className="text-slate-200">{payoff?.pop != null ? `${(payoff.pop * 100).toFixed(1)}%` : '—'}</span>

@@ -256,11 +256,18 @@ export function resolveStrategy(id, { chain, S, lots = 1, w = 2, priceFor, lotSi
 
   const specs = []
   const missing = []
+  const resolvedAt = new Map() // "TYPE:strike" -> target it was aimed at
   for (const lg of legs) {
     const target = atm + lg.k * step
     const strike = nearestStrikeWith(chain, target, lg.type)
     const price = strike != null && priceFor ? priceFor({ strike, type: lg.type }) : null
     if (strike == null || price == null) { missing.push(lg); continue }
+    // Chain doesn't reach this target if the leg collapsed onto a same-type leg aimed at a
+    // different strike (e.g. a condor wing landing on its short leg — that would silently
+    // turn defined risk into a naked position). Treat it as missing instead.
+    const key = `${lg.type}:${strike}`
+    if (resolvedAt.has(key) && resolvedAt.get(key) !== target) { missing.push(lg); continue }
+    resolvedAt.set(key, target)
     specs.push({ type: lg.type, side: lg.side, lots: lg.lots, strike, price })
   }
   const net = specs.reduce((s, x) => s - x.side * x.price * x.lots * lotSize, 0)

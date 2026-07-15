@@ -225,7 +225,12 @@ export function useSim({ base = '', token, ready = true } = {}) {
   // pendingDateRef threads the request through the expiry→dates→load effects above.
   const jumpToDate = useCallback((date) => {
     if (!date || !expiries.length) return
-    const exp = expiries.find((e) => e >= date) || expiries[expiries.length - 1]
+    // expiries arrive DESCENDING (newest first) — .find(e >= date) on that order returned the
+    // NEWEST contract (a 2026 weekly for a 2024 date), whose dates don't include the target day,
+    // so the jump silently landed on the wrong window. Pick the SMALLEST expiry ≥ date (the
+    // contract live that day); a date beyond every expiry falls back to the newest (expiries[0]).
+    const onOrAfter = expiries.filter((e) => e >= date)
+    const exp = onOrAfter.length ? onOrAfter[onOrAfter.length - 1] : expiries[0]
     if (exp === expiry && fromDate === date && timeline) {
       pendingDateRef.current = null
       seek(TL.indexOfDateStart(timeline, date)) // already loaded → just re-seek

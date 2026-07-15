@@ -22,6 +22,15 @@ const fmtDate = (iso) => {
 export default function App() {
   const [session, setSession] = useState(null)
   const [checking, setChecking] = useState(authEnabled)
+  const view = new URLSearchParams(window.location.search).get('view')
+
+  // Per-view browser-tab title (the text shown when hovering the tab).
+  useEffect(() => {
+    document.title =
+      view === 'spot' ? 'Stratos Nifty Chart'
+      : view === 'sim' ? 'Stratos Replay Sim'
+      : 'Stratos Option Chain'
+  }, [view])
 
   useEffect(() => {
     if (!authEnabled) return
@@ -41,7 +50,6 @@ export default function App() {
   }
 
   // Standalone pages opened in their own tabs.
-  const view = new URLSearchParams(window.location.search).get('view')
   if (view === 'spot') return <SpotPage userEmail={session?.user?.email} />
   if (view === 'sim') return <SimPage userEmail={session?.user?.email} />
   return <Viewer userEmail={session?.user?.email} />
@@ -54,6 +62,7 @@ function SpotPage({ userEmail }) {
     <div className="flex h-screen flex-col overflow-hidden bg-ink text-slate-200">
       <header className="flex items-center gap-4 border-b border-edge bg-panel px-4 py-2.5">
         <div className="flex items-center gap-2">
+          <span className="brand-mark h-[22px] w-[39px] shrink-0" aria-hidden />
           <div className="h-5 w-1.5 rounded-full bg-gradient-to-b from-emerald-400 to-sky-400" />
           <h1 className="text-sm font-bold tracking-wide text-slate-100">
             NIFTY SPOT <span className="text-slate-500">— index chart</span>
@@ -193,6 +202,7 @@ function Viewer({ userEmail }) {
       {/* Top app bar */}
       <header className="flex items-center gap-4 border-b border-edge bg-panel px-4 py-2.5">
         <div className="flex items-center gap-2">
+          <span className="brand-mark h-[22px] w-[39px] shrink-0" aria-hidden />
           <div className="h-5 w-1.5 rounded-full bg-gradient-to-b from-sky-400 to-orange-400" />
           <h1 className="text-sm font-bold tracking-wide text-slate-100">
             NIFTY OPTIONS <span className="text-slate-500">— chain &amp; chart</span>

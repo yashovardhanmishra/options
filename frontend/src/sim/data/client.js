@@ -3,7 +3,11 @@
 // 'http://localhost:8000' in the Node demo). `token` is the optional Supabase
 // bearer (the deployed backend requires it; local dev has auth off).
 async function getJson(base, path, token) {
-  const headers = token ? { Authorization: `Bearer ${token}` } : {}
+  // `token` may be a string OR an async GETTER. A getter is resolved per request so a long sim
+  // session survives Supabase access-token expiry (~1h) — a mount-time snapshot went 401 on
+  // every load after expiry with no recovery short of a reload.
+  const tok = typeof token === 'function' ? await token() : token
+  const headers = tok ? { Authorization: `Bearer ${tok}` } : {}
   const res = await fetch((base || '') + path, { headers })
   if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`)
   return res.json()

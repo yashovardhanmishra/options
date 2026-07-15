@@ -47,6 +47,11 @@ export function tfToSeconds(tf) {
 // open (09:15–10:15, 10:15–11:15, …) rather than the clock hour, matching how
 // Indian charting platforms bucket intraday candles.
 const SESSION_OPEN_SEC = 9 * 3600 + 15 * 60 // 33300 (09:15 from IST midnight)
+// NSE session spans 09:15 → 15:30 IST (6h15m). The 15:30:00 print is the CLOSING
+// tick, not the open of a new bar — some days include it, some don't. Fold it (and
+// anything at/after it) into the last in-session bar so it never spawns a lone
+// 15:30 candle on the timeframes where 22500 is a whole multiple of the step (5m/15m).
+const SESSION_LEN_SEC = 6 * 3600 + 15 * 60 // 22500 (09:15 → 15:30)
 
 // Start of the bucket `time` falls into for interval `step` (seconds). Intraday
 // (< 1 day) anchors to each IST day's 09:15 open; daily and above floor to IST
@@ -57,7 +62,10 @@ export function bucketStart(time, step) {
   const open = dayStart + SESSION_OPEN_SEC
   const off = time - open
   if (off < 0) return open // fold any pre-open ticks into the first session bar
-  return open + Math.floor(off / step) * step
+  // Clamp to the last bucket that OPENS inside the session so the 15:30 close folds
+  // into it (e.g. 15m: last open = 15:15, never a fresh 15:30 bar).
+  const lastOff = Math.floor((SESSION_LEN_SEC - 1) / step) * step
+  return open + Math.min(Math.floor(off / step) * step, lastOff)
 }
 
 export function resample(raw, tf) {

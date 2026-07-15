@@ -3,8 +3,8 @@
 // - Hashed static assets (/assets/*): cache-first (they're content-hashed, so immutable).
 // - /api/* and cross-origin: never touched (data + auth must always hit the network).
 // Bump CACHE to invalidate. Registration failures are non-fatal (the app works without it).
-const CACHE = 'stratos-options-v1'
-const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg']
+const CACHE = 'stratos-options-v2'
+const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/icon.png']
 
 self.addEventListener('install', (e) => {
   self.skipWaiting()

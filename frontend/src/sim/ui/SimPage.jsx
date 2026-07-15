@@ -33,9 +33,10 @@ const fmtDate = (iso) => {
 }
 
 export default function SimPage({ userEmail }) {
-  const [token, setToken] = useState(null)
-  useEffect(() => { if (authEnabled) getAccessToken().then(setToken) }, [])
-  const ready = !authEnabled || !!token
+  // Pass the token GETTER, not a snapshot — client.js resolves it per request, so a sim session
+  // longer than the Supabase access-token lifetime (~1h) keeps loading instead of 401ing.
+  const token = authEnabled ? getAccessToken : null
+  const ready = true
 
   const sim = useSim({ base: API_BASE, token, ready })
   const [pick, setPick] = useState(null) // { strike, type } whose ticket is open
@@ -77,7 +78,9 @@ export default function SimPage({ userEmail }) {
   const onReplayPick = (v) => {
     if (!v) return
     if (v === '__challenge') {
-      const d = dailyChallengeDate(sim.allDates, new Date().toISOString().slice(0, 10))
+      // Seed off the IST calendar day, not UTC — otherwise the "daily" challenge flips at
+      // 05:30 IST and disagrees between users across the UTC boundary.
+      const d = dailyChallengeDate(sim.allDates, new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10))
       if (d) sim.jumpToDate(d)
     } else sim.jumpToDate(v)
   }
@@ -104,6 +107,7 @@ export default function SimPage({ userEmail }) {
       {/* header */}
       <header className="flex flex-wrap items-center gap-3 border-b border-edge bg-panel px-4 py-2">
         <div className="flex items-center gap-2">
+          <span className="brand-mark h-[22px] w-[39px] shrink-0" aria-hidden />
           <div className="h-5 w-1.5 rounded-full bg-gradient-to-b from-violet-400 to-sky-400" />
           <h1 className="text-sm font-bold tracking-wide text-slate-100">
             REPLAY SIM <span className="text-slate-500">— paper-trade history</span>

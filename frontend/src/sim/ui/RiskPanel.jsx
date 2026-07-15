@@ -32,8 +32,9 @@ export default function RiskPanel({ book, limits, warnings, breaches, setLimits 
   const autoExits = breaches.filter((b) => AUTO_REASONS.includes(b.reason))
 
   const setLimit = (metric, raw) => {
+    // 0 (like '') means "off" — a stored 0 would breach on any nonzero greek.
     const v = raw === '' ? null : Math.abs(Number(raw))
-    setLimits((l) => ({ ...l, portfolio: { ...l.portfolio, [metric]: Number.isFinite(v) ? v : null } }))
+    setLimits((l) => ({ ...l, portfolio: { ...l.portfolio, [metric]: Number.isFinite(v) && v > 0 ? v : null } }))
   }
   const setPnl = (key, raw) => {
     const v = raw === '' ? null : Math.abs(Number(raw))

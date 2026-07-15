@@ -22,26 +22,35 @@ export default function SearchBar({ onSelect }) {
   const [loading, setLoading] = useState(false)
   const boxRef = useRef(null)
   const timer = useRef(null)
+  const reqId = useRef(0) // monotonically increasing token; stale responses are dropped
 
   // Debounced search
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current)
     const term = q.trim()
     if (term.length < 2) {
+      reqId.current += 1 // invalidate any in-flight request
       setResults([])
       setOpen(false)
+      setLoading(false)
       return
     }
     setLoading(true)
     timer.current = setTimeout(() => {
+      const id = ++reqId.current
       apiSearch(term)
         .then((data) => {
+          if (id !== reqId.current) return // a newer request superseded this one
           setResults(data)
           setActive(0)
           setOpen(true)
         })
-        .catch(() => setResults([]))
-        .finally(() => setLoading(false))
+        .catch(() => {
+          if (id === reqId.current) setResults([])
+        })
+        .finally(() => {
+          if (id === reqId.current) setLoading(false)
+        })
     }, 200)
     return () => timer.current && clearTimeout(timer.current)
   }, [q])
