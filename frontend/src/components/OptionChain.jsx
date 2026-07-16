@@ -14,6 +14,9 @@ const fmtChg = (n) => (n == null ? '—' : (n > 0 ? '+' : '') + compact.format(n
 const chgCls = (n) =>
   n == null ? 'text-slate-600' : n > 0 ? 'text-green-400' : n < 0 ? 'text-red-400' : 'text-slate-400'
 
+// selectable metrics (see the multi-select block below) → the row field + a display label
+const METRIC_LABEL = { oi: 'OI', chgOi: 'Chg OI', volume: 'Vol' }
+
 /** Horizontal OI bar. side='ce' anchors right (grows left), 'pe' anchors left. */
 function OiBar({ value, max, side }) {
   const pct = max > 0 && value ? Math.max(2, (value / max) * 100) : 0
@@ -78,65 +81,71 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
     return { atmStrike: atm, maxOi: mx }
   }, [chain])
 
-  // ── OI multi-select (spreadsheet-style) — click / shift-click / ⌘-click / drag on an OI
-  //    cell to pick rows, Shift+↑/↓ to extend the range, Esc to clear. The floating footer
-  //    sums the picked OI in FULL numbers (not compact K/M). CE and PE columns select
-  //    independently; clicking any non-OI cell (which opens the chart / trade) clears it. ──
-  const [oiSel, setOiSel] = useState(null) // null | { side:'CE'|'PE', set:Set<idx>, anchor, focus }
-  const dragRef = useRef(null) // { side } while dragging
+  // ── Column multi-select (spreadsheet-style) — click / shift-click / ⌘-click / drag on an
+  //    OI, Chg-OI or Vol cell to pick rows, Shift+↑/↓ to extend, Esc to clear. The floating
+  //    footer sums the picked cells in FULL numbers (not compact K/M). Each metric+side is a
+  //    separate column; clicking a strike / LTP (which opens the chart / trades) clears it. ──
+  const [sel, setSel] = useState(null) // null | { metric:'oi'|'chgOi'|'volume', side:'CE'|'PE', set:Set<idx>, anchor, focus }
+  const dragRef = useRef(null) // { metric, side } while dragging
   const movedRef = useRef(false) // did the drag move across rows?
   const suppressRef = useRef(false) // swallow the click that ends a drag
 
-  const oiAt = (i, side) => chain[i]?.[side === 'CE' ? 'ce' : 'pe']?.oi
-  const hasOi = (i, side) => oiAt(i, side) != null
-  const rangeSet = (a, b, side) => {
+  const valAt = (i, metric, side) => chain[i]?.[side === 'CE' ? 'ce' : 'pe']?.[metric]
+  const hasVal = (i, metric, side) => valAt(i, metric, side) != null
+  const rangeSet = (a, b, metric, side) => {
     const s = new Set()
-    for (let i = Math.min(a, b); i <= Math.max(a, b); i++) if (hasOi(i, side)) s.add(i)
+    for (let i = Math.min(a, b); i <= Math.max(a, b); i++) if (hasVal(i, metric, side)) s.add(i)
     return s
   }
-  // next index in `dir` (+1/-1) that actually has OI on this side (skips gaps); clamps at ends.
-  const step = (from, dir, side) => {
-    for (let i = from + dir; i >= 0 && i < chain.length; i += dir) if (hasOi(i, side)) return i
+  // next index in `dir` (+1/-1) that actually has this metric on this side (skips gaps); clamps.
+  const step = (from, dir, metric, side) => {
+    for (let i = from + dir; i >= 0 && i < chain.length; i += dir)
+      if (hasVal(i, metric, side)) return i
     return from
   }
-  const oiSelected = (i, side) => !!oiSel && oiSel.side === side && oiSel.set.has(i)
-  const selSum = oiSel ? [...oiSel.set].reduce((sum, i) => sum + (oiAt(i, oiSel.side) || 0), 0) : 0
+  const isSel = (i, metric, side) =>
+    !!sel && sel.metric === metric && sel.side === side && sel.set.has(i)
+  const selSum = sel
+    ? [...sel.set].reduce((sum, i) => sum + (valAt(i, sel.metric, sel.side) || 0), 0)
+    : 0
 
-  const pickOi = (e, i, side) => {
+  const pick = (e, i, metric, side) => {
     if (suppressRef.current) {
       suppressRef.current = false
       return
     }
-    if (!hasOi(i, side)) return
+    if (!hasVal(i, metric, side)) return
     e.stopPropagation()
-    setOiSel((cur) => {
-      if (e.shiftKey && cur && cur.side === side)
-        return { side, set: rangeSet(cur.anchor, i, side), anchor: cur.anchor, focus: i }
-      if ((e.metaKey || e.ctrlKey) && cur && cur.side === side) {
+    setSel((cur) => {
+      const sameCol = cur && cur.metric === metric && cur.side === side
+      if (e.shiftKey && sameCol)
+        return { metric, side, set: rangeSet(cur.anchor, i, metric, side), anchor: cur.anchor, focus: i }
+      if ((e.metaKey || e.ctrlKey) && sameCol) {
         const set = new Set(cur.set)
         set.has(i) ? set.delete(i) : set.add(i)
-        return set.size ? { side, set, anchor: i, focus: i } : null
+        return set.size ? { metric, side, set, anchor: i, focus: i } : null
       }
-      return { side, set: new Set([i]), anchor: i, focus: i }
+      return { metric, side, set: new Set([i]), anchor: i, focus: i }
     })
   }
-  const dragStart = (e, i, side) => {
-    if (e.button !== 0 || e.shiftKey || e.metaKey || e.ctrlKey || !hasOi(i, side)) return
-    dragRef.current = { side }
+  const dragStart = (e, i, metric, side) => {
+    if (e.button !== 0 || e.shiftKey || e.metaKey || e.ctrlKey || !hasVal(i, metric, side)) return
+    dragRef.current = { metric, side }
     movedRef.current = false
-    setOiSel({ side, set: new Set([i]), anchor: i, focus: i })
+    setSel({ metric, side, set: new Set([i]), anchor: i, focus: i })
   }
-  const dragOver = (i, side) => {
-    if (!dragRef.current || dragRef.current.side !== side || !hasOi(i, side)) return
+  const dragOver = (i, metric, side) => {
+    const d = dragRef.current
+    if (!d || d.metric !== metric || d.side !== side || !hasVal(i, metric, side)) return
     movedRef.current = true
-    setOiSel((cur) => (cur ? { ...cur, set: rangeSet(cur.anchor, i, side), focus: i } : cur))
+    setSel((cur) => (cur ? { ...cur, set: rangeSet(cur.anchor, i, metric, side), focus: i } : cur))
   }
-  const oiHandlers = (i, side) => ({
-    onMouseDown: (e) => dragStart(e, i, side),
-    onMouseEnter: () => dragOver(i, side),
-    onClick: (e) => pickOi(e, i, side),
+  const cellHandlers = (i, metric, side) => ({
+    onMouseDown: (e) => dragStart(e, i, metric, side),
+    onMouseEnter: () => dragOver(i, metric, side),
+    onClick: (e) => pick(e, i, metric, side),
   })
-  const oiCls = (on, side) =>
+  const selCls = (on, side) =>
     on
       ? side === 'CE'
         ? 'bg-sky-500/30 ring-1 ring-inset ring-sky-300/70'
@@ -153,24 +162,24 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
     return () => window.removeEventListener('mouseup', up)
   }, [])
   useEffect(() => {
-    if (!oiSel) return
+    if (!sel) return
     const onKey = (e) => {
-      if (e.key === 'Escape') return setOiSel(null)
+      if (e.key === 'Escape') return setSel(null)
       if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
       e.preventDefault()
       const dir = e.key === 'ArrowDown' ? 1 : -1
-      setOiSel((cur) => {
+      setSel((cur) => {
         if (!cur) return cur
-        const nf = step(cur.focus, dir, cur.side)
+        const nf = step(cur.focus, dir, cur.metric, cur.side)
         return e.shiftKey
-          ? { ...cur, set: rangeSet(cur.anchor, nf, cur.side), focus: nf }
-          : { side: cur.side, set: new Set([nf]), anchor: nf, focus: nf }
+          ? { ...cur, set: rangeSet(cur.anchor, nf, cur.metric, cur.side), focus: nf }
+          : { metric: cur.metric, side: cur.side, set: new Set([nf]), anchor: nf, focus: nf }
       })
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [oiSel, chain])
-  useEffect(() => setOiSel(null), [chain]) // drop stale index-based selection on new data
+  }, [sel, chain])
+  useEffect(() => setSel(null), [chain]) // drop stale index-based selection on new data
 
   if (!chain || chain.length === 0) {
     return (
@@ -231,8 +240,6 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
               const peSel = selected?.strike === row.strike && selected?.type === 'PE'
               const ceHi = sideHi(positions, row.strike, 'CE')
               const peHi = sideHi(positions, row.strike, 'PE')
-              const ceOiSel = oiSelected(i, 'CE')
-              const peOiSel = oiSelected(i, 'PE')
 
               const ceCell =
                 'cursor-pointer bg-sky-500/[0.04] px-2 py-1 transition-colors hover:bg-sky-500/20'
@@ -241,12 +248,13 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
               const ceSelCls = ceSel ? 'bg-sky-500/25 ring-1 ring-inset ring-sky-400/60' : ''
               const peSelCls = peSel ? 'bg-orange-500/25 ring-1 ring-inset ring-orange-400/60' : ''
 
+              // LTP cells open the chart / place a trade (and clear any metric selection).
               const onCe = () => {
-                setOiSel(null)
+                setSel(null)
                 row.ce && onSelect(row.strike, 'CE')
               }
               const onPe = () => {
-                setOiSel(null)
+                setSel(null)
                 row.pe && onSelect(row.strike, 'PE')
               }
 
@@ -254,28 +262,28 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
                 <tr key={row.strike} className={isAtm ? 'bg-amber-400/[0.07]' : ''}>
                   {/* CALLS */}
                   <td
-                    className={`${ceCell} ${oiCls(ceOiSel, 'CE')} w-[88px] select-none`}
-                    {...oiHandlers(i, 'CE')}
+                    className={`${ceCell} ${selCls(isSel(i, 'oi', 'CE'), 'CE')} w-[88px] select-none`}
+                    {...cellHandlers(i, 'oi', 'CE')}
                   >
                     <OiBar value={row.ce?.oi} max={maxOi} side="ce" />
                   </td>
                   <td
-                    className={`${ceCell} ${oiCls(ceOiSel, 'CE')} select-none text-slate-300`}
-                    {...oiHandlers(i, 'CE')}
+                    className={`${ceCell} ${selCls(isSel(i, 'oi', 'CE'), 'CE')} select-none text-slate-300`}
+                    {...cellHandlers(i, 'oi', 'CE')}
                     title={fmtFull(row.ce?.oi)}
                   >
                     {fmtOi(row.ce?.oi)}
                   </td>
                   <td
-                    className={`${ceCell} ${ceSelCls} ${chgCls(row.ce?.chgOi)}`}
-                    onClick={onCe}
+                    className={`${ceCell} ${selCls(isSel(i, 'chgOi', 'CE'), 'CE')} select-none ${chgCls(row.ce?.chgOi)}`}
+                    {...cellHandlers(i, 'chgOi', 'CE')}
                     title={fmtFull(row.ce?.chgOi)}
                   >
                     {fmtChg(row.ce?.chgOi)}
                   </td>
                   <td
-                    className={`${ceCell} ${ceSelCls} text-slate-400`}
-                    onClick={onCe}
+                    className={`${ceCell} ${selCls(isSel(i, 'volume', 'CE'), 'CE')} select-none text-slate-400`}
+                    {...cellHandlers(i, 'volume', 'CE')}
                     title={fmtFull(row.ce?.volume)}
                   >
                     {fmtVol(row.ce?.volume)}
@@ -308,29 +316,29 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
                     {fmtLtp(row.pe?.ltp)}
                   </td>
                   <td
-                    className={`${peCell} ${peSelCls} text-left text-slate-400`}
-                    onClick={onPe}
+                    className={`${peCell} ${selCls(isSel(i, 'volume', 'PE'), 'PE')} select-none text-left text-slate-400`}
+                    {...cellHandlers(i, 'volume', 'PE')}
                     title={fmtFull(row.pe?.volume)}
                   >
                     {fmtVol(row.pe?.volume)}
                   </td>
                   <td
-                    className={`${peCell} ${peSelCls} text-left ${chgCls(row.pe?.chgOi)}`}
-                    onClick={onPe}
+                    className={`${peCell} ${selCls(isSel(i, 'chgOi', 'PE'), 'PE')} select-none text-left ${chgCls(row.pe?.chgOi)}`}
+                    {...cellHandlers(i, 'chgOi', 'PE')}
                     title={fmtFull(row.pe?.chgOi)}
                   >
                     {fmtChg(row.pe?.chgOi)}
                   </td>
                   <td
-                    className={`${peCell} ${oiCls(peOiSel, 'PE')} select-none text-left text-slate-300`}
-                    {...oiHandlers(i, 'PE')}
+                    className={`${peCell} ${selCls(isSel(i, 'oi', 'PE'), 'PE')} select-none text-left text-slate-300`}
+                    {...cellHandlers(i, 'oi', 'PE')}
                     title={fmtFull(row.pe?.oi)}
                   >
                     {fmtOi(row.pe?.oi)}
                   </td>
                   <td
-                    className={`${peCell} ${oiCls(peOiSel, 'PE')} w-[88px] select-none`}
-                    {...oiHandlers(i, 'PE')}
+                    className={`${peCell} ${selCls(isSel(i, 'oi', 'PE'), 'PE')} w-[88px] select-none`}
+                    {...cellHandlers(i, 'oi', 'PE')}
                   >
                     <OiBar value={row.pe?.oi} max={maxOi} side="pe" />
                   </td>
@@ -341,23 +349,24 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
         </table>
       </div>
 
-      {oiSel && oiSel.set.size > 0 && (
+      {sel && sel.set.size > 0 && (
         <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-edge bg-panel2/95 px-3 py-1.5 shadow-xl backdrop-blur">
           <span
             className={`text-xs font-semibold uppercase tracking-wide ${
-              oiSel.side === 'CE' ? 'text-sky-300' : 'text-orange-300'
+              sel.side === 'CE' ? 'text-sky-300' : 'text-orange-300'
             }`}
           >
-            {oiSel.side} OI
+            {sel.side} {METRIC_LABEL[sel.metric]}
           </span>
           <span className="text-xs text-slate-400">
-            {oiSel.set.size} {oiSel.set.size === 1 ? 'strike' : 'strikes'}
+            {sel.set.size} {sel.set.size === 1 ? 'strike' : 'strikes'}
           </span>
           <span className="font-mono text-sm font-bold tabular-nums text-white">
-            Σ&nbsp;{indian.format(selSum)}
+            Σ&nbsp;{sel.metric === 'chgOi' && selSum > 0 ? '+' : ''}
+            {indian.format(selSum)}
           </span>
           <button
-            onClick={() => setOiSel(null)}
+            onClick={() => setSel(null)}
             title="Clear selection (Esc)"
             className="text-slate-500 hover:text-white"
           >
