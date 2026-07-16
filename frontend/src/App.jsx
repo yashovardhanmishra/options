@@ -102,6 +102,7 @@ function Viewer({ userEmail }) {
   const [date, setDate] = useState('')
   const [times, setTimes] = useState([])
   const [time, setTime] = useState('') // '' = end-of-day (last row)
+  const [oiBase, setOiBase] = useState('prev_close') // Chg OI baseline: prev_close | day_open
   const [chain, setChain] = useState([])
   const [chainLoading, setChainLoading] = useState(false)
   const [selection, setSelection] = useState(null) // { expiry, strike, type }
@@ -171,14 +172,14 @@ function Viewer({ userEmail }) {
     }
     let cancelled = false
     setChainLoading(true)
-    getChain(expiry, date, time)
+    getChain(expiry, date, time, oiBase)
       .then((rows) => !cancelled && setChain(rows))
       .catch(() => !cancelled && setChain([]))
       .finally(() => !cancelled && setChainLoading(false))
     return () => {
       cancelled = true
     }
-  }, [expiry, date, time])
+  }, [expiry, date, time, oiBase])
 
   const handleChainSelect = (strike, type) =>
     setSelection({ expiry, strike, type })
@@ -318,6 +319,30 @@ function Viewer({ userEmail }) {
                     </option>
                   ))}
                 </select>
+              </label>
+
+              <label className="flex items-center gap-1.5">
+                <span className="text-xs uppercase tracking-wide text-slate-500">Chg OI</span>
+                <div className="flex overflow-hidden rounded border border-edge" role="group" aria-label="Change in OI baseline">
+                  {[
+                    ['prev_close', 'Prev Close', "Change in OI vs the previous day's close"],
+                    ['day_open', 'Day Open', "Change in OI vs today's open (09:15)"],
+                  ].map(([val, lbl, tip]) => (
+                    <button
+                      key={val}
+                      onClick={() => setOiBase(val)}
+                      title={tip}
+                      aria-pressed={oiBase === val}
+                      className={`px-2 py-1 text-xs transition-colors ${
+                        oiBase === val
+                          ? 'bg-sky-600/30 text-sky-200'
+                          : 'bg-panel text-slate-400 hover:bg-edge hover:text-slate-200'
+                      }`}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
               </label>
 
               <div className="ml-auto flex items-center gap-3 text-xs text-slate-500">

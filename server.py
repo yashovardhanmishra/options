@@ -165,11 +165,17 @@ def _db_times(expiry, date):
     return [r[0] for r in _q("SELECT hm FROM dim_times WHERE expiry = ? AND date = ? ORDER BY hm", [expiry, date])]
 
 
-def _db_chain(expiry, date, hm):
-    # snapshot at/before the time, plus each strike's last OI on any earlier day
-    # (previous close) so we can show the change in OI (chgOi = oi - prev_oi).
+def _db_chain(expiry, date, hm, oi_base="prev_close"):
+    # snapshot at/before the time, plus each strike's BASELINE OI for the change-in-OI
+    # column (chgOi = oi - base_oi). The baseline is user-selectable:
+    #   prev_close (default) — the strike's last OI on any EARLIER day (previous close)
+    #   day_open             — the strike's FIRST OI on `date` (today's 09:15 open)
+    if oi_base == "day_open":
+        base_where, base_order = "expiry = ? AND date = ?", "ASC"
+    else:
+        base_where, base_order = "expiry = ? AND date < ?", "DESC"
     rows = _q(
-        """
+        f"""
         SELECT s.strike, s.type, s.close, s.oi, s.volume, p.prev_oi FROM (
           SELECT strike, type, close, oi, volume FROM (
             SELECT strike, type, close, oi, volume,
@@ -181,8 +187,8 @@ def _db_chain(expiry, date, hm):
         LEFT JOIN (
           SELECT strike, type, oi AS prev_oi FROM (
             SELECT strike, type, oi,
-                   row_number() OVER (PARTITION BY strike, type ORDER BY unix DESC) AS rn
-            FROM bars WHERE expiry = ? AND date < ?
+                   row_number() OVER (PARTITION BY strike, type ORDER BY unix {base_order}) AS rn
+            FROM bars WHERE {base_where}
           ) WHERE rn = 1
         ) p ON s.strike = p.strike AND s.type = p.type
         """,
@@ -442,6 +448,7 @@ def chain(
     expiry: str = Query(...),
     date: str = Query(...),
     time: str | None = Query(None),
+    oi_base: str = Query("prev_close"),
 ):
     """
     Option chain snapshot for `date`. For every strike take the LAST row at or
@@ -449,12 +456,18 @@ def chain(
     moment. Omit `time` to use the last row of the whole day (end-of-day).
     LTP=Close, OI=Open Interest, Volume=that row's volume. Strikes present on
     only one side get a null on the missing side.
+
+    `oi_base` selects the baseline for the change-in-OI column:
+      prev_close (default) — vs the strike's previous market close (last earlier day)
+      day_open             — vs the strike's current-day open (first bar of `date`)
     """
     hm = _norm_hm(time) if time else None
     if time and hm is None:
         raise HTTPException(400, f"Invalid time {time!r}; expected HH:MM")
+    if oi_base not in ("prev_close", "day_open"):
+        oi_base = "prev_close"
     if USING_DB:
-        return _db_chain(expiry, date, hm)
+        return _db_chain(expiry, date, hm, oi_base)
     folder = find_expiry_dir(expiry)
     strikes: dict[int, dict] = {}
 
@@ -473,14 +486,19 @@ def chain(
         if not day.empty:
             row = day.iloc[-1]
             oi = float(row["Open Interest"])
-            # previous close OI = this strike's last OI on any earlier day
-            prev = df[df["__date"] < date]
-            prev_oi = float(prev.iloc[-1]["Open Interest"]) if not prev.empty else None
+            # baseline OI for chgOi: previous market close (this strike's last OI on an
+            # earlier day) or today's open (its first OI on `date`), per oi_base.
+            if oi_base == "day_open":
+                today = df[df["__date"] == date]
+                base_oi = float(today.iloc[0]["Open Interest"]) if not today.empty else None
+            else:
+                prev = df[df["__date"] < date]
+                base_oi = float(prev.iloc[-1]["Open Interest"]) if not prev.empty else None
             snap = {
                 "ltp": float(row["Close"]),
                 "oi": oi,
                 "volume": float(row["Volume"]),
-                "chgOi": (oi - prev_oi) if prev_oi is not None else None,
+                "chgOi": (oi - base_oi) if base_oi is not None else None,
             }
 
         entry = strikes.setdefault(strike, {"strike": strike, "ce": None, "pe": None})

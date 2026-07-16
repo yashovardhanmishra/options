@@ -32,8 +32,10 @@ export const getDates = (expiry) =>
 export const getTimes = (expiry, date) =>
   api.get('/api/times', { params: { expiry, date } }).then((r) => r.data)
 
-export const getChain = (expiry, date, time) =>
-  api.get('/api/chain', { params: { expiry, date, time: time || undefined } }).then((r) => r.data)
+export const getChain = (expiry, date, time, oiBase) =>
+  api
+    .get('/api/chain', { params: { expiry, date, time: time || undefined, oi_base: oiBase || undefined } })
+    .then((r) => r.data)
 
 export const getChart = (expiry, strike, type) =>
   api.get('/api/chart', { params: { expiry, strike, type } }).then((r) => r.data)
