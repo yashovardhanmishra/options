@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 
 const compact = new Intl.NumberFormat('en-US', {
   notation: 'compact',
@@ -78,6 +78,100 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
     return { atmStrike: atm, maxOi: mx }
   }, [chain])
 
+  // ── OI multi-select (spreadsheet-style) — click / shift-click / ⌘-click / drag on an OI
+  //    cell to pick rows, Shift+↑/↓ to extend the range, Esc to clear. The floating footer
+  //    sums the picked OI in FULL numbers (not compact K/M). CE and PE columns select
+  //    independently; clicking any non-OI cell (which opens the chart / trade) clears it. ──
+  const [oiSel, setOiSel] = useState(null) // null | { side:'CE'|'PE', set:Set<idx>, anchor, focus }
+  const dragRef = useRef(null) // { side } while dragging
+  const movedRef = useRef(false) // did the drag move across rows?
+  const suppressRef = useRef(false) // swallow the click that ends a drag
+
+  const oiAt = (i, side) => chain[i]?.[side === 'CE' ? 'ce' : 'pe']?.oi
+  const hasOi = (i, side) => oiAt(i, side) != null
+  const rangeSet = (a, b, side) => {
+    const s = new Set()
+    for (let i = Math.min(a, b); i <= Math.max(a, b); i++) if (hasOi(i, side)) s.add(i)
+    return s
+  }
+  // next index in `dir` (+1/-1) that actually has OI on this side (skips gaps); clamps at ends.
+  const step = (from, dir, side) => {
+    for (let i = from + dir; i >= 0 && i < chain.length; i += dir) if (hasOi(i, side)) return i
+    return from
+  }
+  const oiSelected = (i, side) => !!oiSel && oiSel.side === side && oiSel.set.has(i)
+  const selSum = oiSel ? [...oiSel.set].reduce((sum, i) => sum + (oiAt(i, oiSel.side) || 0), 0) : 0
+
+  const pickOi = (e, i, side) => {
+    if (suppressRef.current) {
+      suppressRef.current = false
+      return
+    }
+    if (!hasOi(i, side)) return
+    e.stopPropagation()
+    setOiSel((cur) => {
+      if (e.shiftKey && cur && cur.side === side)
+        return { side, set: rangeSet(cur.anchor, i, side), anchor: cur.anchor, focus: i }
+      if ((e.metaKey || e.ctrlKey) && cur && cur.side === side) {
+        const set = new Set(cur.set)
+        set.has(i) ? set.delete(i) : set.add(i)
+        return set.size ? { side, set, anchor: i, focus: i } : null
+      }
+      return { side, set: new Set([i]), anchor: i, focus: i }
+    })
+  }
+  const dragStart = (e, i, side) => {
+    if (e.button !== 0 || e.shiftKey || e.metaKey || e.ctrlKey || !hasOi(i, side)) return
+    dragRef.current = { side }
+    movedRef.current = false
+    setOiSel({ side, set: new Set([i]), anchor: i, focus: i })
+  }
+  const dragOver = (i, side) => {
+    if (!dragRef.current || dragRef.current.side !== side || !hasOi(i, side)) return
+    movedRef.current = true
+    setOiSel((cur) => (cur ? { ...cur, set: rangeSet(cur.anchor, i, side), focus: i } : cur))
+  }
+  const oiHandlers = (i, side) => ({
+    onMouseDown: (e) => dragStart(e, i, side),
+    onMouseEnter: () => dragOver(i, side),
+    onClick: (e) => pickOi(e, i, side),
+  })
+  const oiCls = (on, side) =>
+    on
+      ? side === 'CE'
+        ? 'bg-sky-500/30 ring-1 ring-inset ring-sky-300/70'
+        : 'bg-orange-500/30 ring-1 ring-inset ring-orange-300/70'
+      : ''
+
+  useEffect(() => {
+    const up = () => {
+      if (dragRef.current && movedRef.current) suppressRef.current = true
+      dragRef.current = null
+      movedRef.current = false
+    }
+    window.addEventListener('mouseup', up)
+    return () => window.removeEventListener('mouseup', up)
+  }, [])
+  useEffect(() => {
+    if (!oiSel) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') return setOiSel(null)
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+      e.preventDefault()
+      const dir = e.key === 'ArrowDown' ? 1 : -1
+      setOiSel((cur) => {
+        if (!cur) return cur
+        const nf = step(cur.focus, dir, cur.side)
+        return e.shiftKey
+          ? { ...cur, set: rangeSet(cur.anchor, nf, cur.side), focus: nf }
+          : { side: cur.side, set: new Set([nf]), anchor: nf, focus: nf }
+      })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [oiSel, chain])
+  useEffect(() => setOiSel(null), [chain]) // drop stale index-based selection on new data
+
   if (!chain || chain.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-slate-500">
@@ -95,144 +189,182 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
   )
 
   return (
-    <div className="h-full overflow-auto">
-      <table className="w-full border-collapse text-right font-mono text-xs tabular-nums">
-        <thead>
-          <tr>
-            <th
-              colSpan={5}
-              className="sticky top-0 z-10 bg-panel px-2 py-1 text-center text-[11px] font-bold uppercase tracking-widest text-sky-400"
-            >
-              Calls
-            </th>
-            <th className="sticky top-0 z-10 bg-panel px-2 py-1 text-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
-              Strike
-            </th>
-            <th
-              colSpan={5}
-              className="sticky top-0 z-10 bg-panel px-2 py-1 text-center text-[11px] font-bold uppercase tracking-widest text-orange-400"
-            >
-              Puts
-            </th>
-          </tr>
-          <tr>
-            <Th className="text-center">OI bar</Th>
-            <Th>OI</Th>
-            <Th>Chg OI</Th>
-            <Th>Vol</Th>
-            <Th className="text-sky-300/80">LTP</Th>
-            <Th className="text-center">—</Th>
-            <Th className="text-left text-orange-300/80">LTP</Th>
-            <Th className="text-left">Vol</Th>
-            <Th className="text-left">Chg OI</Th>
-            <Th className="text-left">OI</Th>
-            <Th className="text-center">OI bar</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {chain.map((row) => {
-            const isAtm = row.strike === atmStrike
-            const ceSel = selected?.strike === row.strike && selected?.type === 'CE'
-            const peSel = selected?.strike === row.strike && selected?.type === 'PE'
-            const ceHi = sideHi(positions, row.strike, 'CE')
-            const peHi = sideHi(positions, row.strike, 'PE')
-
-            const ceCell =
-              'cursor-pointer bg-sky-500/[0.04] px-2 py-1 transition-colors hover:bg-sky-500/20'
-            const peCell =
-              'cursor-pointer bg-orange-500/[0.04] px-2 py-1 transition-colors hover:bg-orange-500/20'
-            const ceSelCls = ceSel ? 'bg-sky-500/25 ring-1 ring-inset ring-sky-400/60' : ''
-            const peSelCls = peSel ? 'bg-orange-500/25 ring-1 ring-inset ring-orange-400/60' : ''
-
-            const onCe = () => row.ce && onSelect(row.strike, 'CE')
-            const onPe = () => row.pe && onSelect(row.strike, 'PE')
-
-            return (
-              <tr
-                key={row.strike}
-                className={isAtm ? 'bg-amber-400/[0.07]' : ''}
+    <div className="relative h-full">
+      <div className="h-full overflow-auto">
+        <table className="w-full border-collapse text-right font-mono text-xs tabular-nums">
+          <thead>
+            <tr>
+              <th
+                colSpan={5}
+                className="sticky top-0 z-10 bg-panel px-2 py-1 text-center text-[11px] font-bold uppercase tracking-widest text-sky-400"
               >
-                {/* CALLS */}
-                <td className={`${ceCell} ${ceSelCls} w-[88px]`} onClick={onCe}>
-                  <OiBar value={row.ce?.oi} max={maxOi} side="ce" />
-                </td>
-                <td
-                  className={`${ceCell} ${ceSelCls} text-slate-300`}
-                  onClick={onCe}
-                  title={fmtFull(row.ce?.oi)}
-                >
-                  {fmtOi(row.ce?.oi)}
-                </td>
-                <td
-                  className={`${ceCell} ${ceSelCls} ${chgCls(row.ce?.chgOi)}`}
-                  onClick={onCe}
-                  title={fmtFull(row.ce?.chgOi)}
-                >
-                  {fmtChg(row.ce?.chgOi)}
-                </td>
-                <td
-                  className={`${ceCell} ${ceSelCls} text-slate-400`}
-                  onClick={onCe}
-                  title={fmtFull(row.ce?.volume)}
-                >
-                  {fmtVol(row.ce?.volume)}
-                </td>
-                <td
-                  className={`${ceCell} ${ceSelCls} font-semibold text-sky-200`}
-                  style={ceHi ? { background: HILITE[ceHi] } : undefined}
-                  onClick={onCe}
-                >
-                  {fmtLtp(row.ce?.ltp)}
-                </td>
+                Calls
+              </th>
+              <th className="sticky top-0 z-10 bg-panel px-2 py-1 text-center text-[11px] font-bold uppercase tracking-widest text-slate-300">
+                Strike
+              </th>
+              <th
+                colSpan={5}
+                className="sticky top-0 z-10 bg-panel px-2 py-1 text-center text-[11px] font-bold uppercase tracking-widest text-orange-400"
+              >
+                Puts
+              </th>
+            </tr>
+            <tr>
+              <Th className="text-center">OI bar</Th>
+              <Th>OI</Th>
+              <Th>Chg OI</Th>
+              <Th>Vol</Th>
+              <Th className="text-sky-300/80">LTP</Th>
+              <Th className="text-center">—</Th>
+              <Th className="text-left text-orange-300/80">LTP</Th>
+              <Th className="text-left">Vol</Th>
+              <Th className="text-left">Chg OI</Th>
+              <Th className="text-left">OI</Th>
+              <Th className="text-center">OI bar</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {chain.map((row, i) => {
+              const isAtm = row.strike === atmStrike
+              const ceSel = selected?.strike === row.strike && selected?.type === 'CE'
+              const peSel = selected?.strike === row.strike && selected?.type === 'PE'
+              const ceHi = sideHi(positions, row.strike, 'CE')
+              const peHi = sideHi(positions, row.strike, 'PE')
+              const ceOiSel = oiSelected(i, 'CE')
+              const peOiSel = oiSelected(i, 'PE')
 
-                {/* STRIKE */}
-                <td
-                  className={`px-2 py-1 text-center font-bold ${
-                    isAtm
-                      ? 'bg-amber-400/20 text-amber-300'
-                      : 'bg-panel2 text-slate-200'
-                  }`}
-                >
-                  {row.strike}
-                </td>
+              const ceCell =
+                'cursor-pointer bg-sky-500/[0.04] px-2 py-1 transition-colors hover:bg-sky-500/20'
+              const peCell =
+                'cursor-pointer bg-orange-500/[0.04] px-2 py-1 transition-colors hover:bg-orange-500/20'
+              const ceSelCls = ceSel ? 'bg-sky-500/25 ring-1 ring-inset ring-sky-400/60' : ''
+              const peSelCls = peSel ? 'bg-orange-500/25 ring-1 ring-inset ring-orange-400/60' : ''
 
-                {/* PUTS */}
-                <td
-                  className={`${peCell} ${peSelCls} text-left font-semibold text-orange-200`}
-                  style={peHi ? { background: HILITE[peHi] } : undefined}
-                  onClick={onPe}
-                >
-                  {fmtLtp(row.pe?.ltp)}
-                </td>
-                <td
-                  className={`${peCell} ${peSelCls} text-left text-slate-400`}
-                  onClick={onPe}
-                  title={fmtFull(row.pe?.volume)}
-                >
-                  {fmtVol(row.pe?.volume)}
-                </td>
-                <td
-                  className={`${peCell} ${peSelCls} text-left ${chgCls(row.pe?.chgOi)}`}
-                  onClick={onPe}
-                  title={fmtFull(row.pe?.chgOi)}
-                >
-                  {fmtChg(row.pe?.chgOi)}
-                </td>
-                <td
-                  className={`${peCell} ${peSelCls} text-left text-slate-300`}
-                  onClick={onPe}
-                  title={fmtFull(row.pe?.oi)}
-                >
-                  {fmtOi(row.pe?.oi)}
-                </td>
-                <td className={`${peCell} ${peSelCls} w-[88px]`} onClick={onPe}>
-                  <OiBar value={row.pe?.oi} max={maxOi} side="pe" />
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
+              const onCe = () => {
+                setOiSel(null)
+                row.ce && onSelect(row.strike, 'CE')
+              }
+              const onPe = () => {
+                setOiSel(null)
+                row.pe && onSelect(row.strike, 'PE')
+              }
+
+              return (
+                <tr key={row.strike} className={isAtm ? 'bg-amber-400/[0.07]' : ''}>
+                  {/* CALLS */}
+                  <td
+                    className={`${ceCell} ${oiCls(ceOiSel, 'CE')} w-[88px] select-none`}
+                    {...oiHandlers(i, 'CE')}
+                  >
+                    <OiBar value={row.ce?.oi} max={maxOi} side="ce" />
+                  </td>
+                  <td
+                    className={`${ceCell} ${oiCls(ceOiSel, 'CE')} select-none text-slate-300`}
+                    {...oiHandlers(i, 'CE')}
+                    title={fmtFull(row.ce?.oi)}
+                  >
+                    {fmtOi(row.ce?.oi)}
+                  </td>
+                  <td
+                    className={`${ceCell} ${ceSelCls} ${chgCls(row.ce?.chgOi)}`}
+                    onClick={onCe}
+                    title={fmtFull(row.ce?.chgOi)}
+                  >
+                    {fmtChg(row.ce?.chgOi)}
+                  </td>
+                  <td
+                    className={`${ceCell} ${ceSelCls} text-slate-400`}
+                    onClick={onCe}
+                    title={fmtFull(row.ce?.volume)}
+                  >
+                    {fmtVol(row.ce?.volume)}
+                  </td>
+                  <td
+                    className={`${ceCell} ${ceSelCls} font-semibold text-sky-200`}
+                    style={ceHi ? { background: HILITE[ceHi] } : undefined}
+                    onClick={onCe}
+                  >
+                    {fmtLtp(row.ce?.ltp)}
+                  </td>
+
+                  {/* STRIKE */}
+                  <td
+                    className={`px-2 py-1 text-center font-bold ${
+                      isAtm
+                        ? 'bg-amber-400/20 text-amber-300'
+                        : 'bg-panel2 text-slate-200'
+                    }`}
+                  >
+                    {row.strike}
+                  </td>
+
+                  {/* PUTS */}
+                  <td
+                    className={`${peCell} ${peSelCls} text-left font-semibold text-orange-200`}
+                    style={peHi ? { background: HILITE[peHi] } : undefined}
+                    onClick={onPe}
+                  >
+                    {fmtLtp(row.pe?.ltp)}
+                  </td>
+                  <td
+                    className={`${peCell} ${peSelCls} text-left text-slate-400`}
+                    onClick={onPe}
+                    title={fmtFull(row.pe?.volume)}
+                  >
+                    {fmtVol(row.pe?.volume)}
+                  </td>
+                  <td
+                    className={`${peCell} ${peSelCls} text-left ${chgCls(row.pe?.chgOi)}`}
+                    onClick={onPe}
+                    title={fmtFull(row.pe?.chgOi)}
+                  >
+                    {fmtChg(row.pe?.chgOi)}
+                  </td>
+                  <td
+                    className={`${peCell} ${oiCls(peOiSel, 'PE')} select-none text-left text-slate-300`}
+                    {...oiHandlers(i, 'PE')}
+                    title={fmtFull(row.pe?.oi)}
+                  >
+                    {fmtOi(row.pe?.oi)}
+                  </td>
+                  <td
+                    className={`${peCell} ${oiCls(peOiSel, 'PE')} w-[88px] select-none`}
+                    {...oiHandlers(i, 'PE')}
+                  >
+                    <OiBar value={row.pe?.oi} max={maxOi} side="pe" />
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {oiSel && oiSel.set.size > 0 && (
+        <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-edge bg-panel2/95 px-3 py-1.5 shadow-xl backdrop-blur">
+          <span
+            className={`text-xs font-semibold uppercase tracking-wide ${
+              oiSel.side === 'CE' ? 'text-sky-300' : 'text-orange-300'
+            }`}
+          >
+            {oiSel.side} OI
+          </span>
+          <span className="text-xs text-slate-400">
+            {oiSel.set.size} {oiSel.set.size === 1 ? 'strike' : 'strikes'}
+          </span>
+          <span className="font-mono text-sm font-bold tabular-nums text-white">
+            Σ&nbsp;{indian.format(selSum)}
+          </span>
+          <button
+            onClick={() => setOiSel(null)}
+            title="Clear selection (Esc)"
+            className="text-slate-500 hover:text-white"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   )
 }
