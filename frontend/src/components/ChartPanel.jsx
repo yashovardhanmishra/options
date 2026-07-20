@@ -101,6 +101,11 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
     setIndicators((list) =>
       list.map((x) => (x.uid === uid ? { ...x, params: { ...x.params, ...patch } } : x)),
     )
+  // Per-plot color override for an applied indicator: colors = { [plotId]: '#hex' }.
+  const setIndColor = (uid, plotId, hex) =>
+    setIndicators((list) =>
+      list.map((x) => (x.uid === uid ? { ...x, colors: { ...x.colors, [plotId]: hex } } : x)),
+    )
 
   const addPattern = (key) => setPatterns((list) => (list.includes(key) ? list : [...list, key]))
   const removePattern = (key) => setPatterns((list) => list.filter((k) => k !== key))
@@ -523,12 +528,13 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
       const scaleId = def.overlay ? 'right' : oscScale.get(ind.uid)
       const created = []
       for (const plot of plots) {
+        const col = ind.colors?.[plot.id] || plot.color
         const s =
           plot.kind === 'histogram'
-            ? chart.addHistogramSeries({ priceScaleId: scaleId, priceLineVisible: false, lastValueVisible: false })
+            ? chart.addHistogramSeries({ priceScaleId: scaleId, color: col, priceLineVisible: false, lastValueVisible: false })
             : chart.addLineSeries({
                 priceScaleId: scaleId,
-                color: plot.color,
+                color: col,
                 lineWidth: plot.lineWidth ?? 2,
                 lineStyle: plot.lineStyle ?? 0,
                 lineType: plot.stepped ? 1 : 0,
@@ -536,8 +542,13 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
                 lastValueVisible: false,
                 crosshairMarkerVisible: false,
               })
-        s.setData(plot.data)
-        created.push({ series: s, id: plot.id, color: plot.color })
+        // a color override on a histogram must recolor its per-bar data too
+        const data =
+          plot.kind === 'histogram' && ind.colors?.[plot.id]
+            ? plot.data.map((d) => ({ ...d, color: col }))
+            : plot.data
+        s.setData(data)
+        created.push({ series: s, id: plot.id, color: col })
       }
       if (!def.overlay && def.refs && created[0]) {
         for (const r of def.refs) {
@@ -550,7 +561,7 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
       }
       indSeriesRef.current.set(ind.uid, {
         label: def.label ? def.label(ind.params) : def.name,
-        color: plots[0]?.color || '#94a3b8',
+        color: (plots[0] && (ind.colors?.[plots[0].id] || plots[0].color)) || '#94a3b8',
         plots: created,
       })
     }
@@ -828,15 +839,13 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
                     >
                       {'{ }'}
                     </button>
-                    {def.params?.length > 0 && (
-                      <button
-                        onClick={() => setEditing((e) => (e === ind.uid ? null : ind.uid))}
-                        title="Settings"
-                        className="text-slate-500 hover:text-sky-300"
-                      >
-                        ⚙
-                      </button>
-                    )}
+                    <button
+                      onClick={() => setEditing((e) => (e === ind.uid ? null : ind.uid))}
+                      title="Settings & colour"
+                      className="text-slate-500 hover:text-sky-300"
+                    >
+                      ⚙
+                    </button>
                     <button
                       onClick={() => removeIndicator(ind.uid)}
                       title="Remove indicator"
@@ -845,22 +854,52 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
                       ✕
                     </button>
                   </div>
-                  {editing === ind.uid && def.params?.length > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-2 border-t border-edge pt-1">
-                      {def.params.map((pp) => (
-                        <label key={pp.key} className="flex items-center gap-1 text-[10px] text-slate-400">
-                          {pp.label}
-                          <input
-                            type="number"
-                            value={ind.params[pp.key]}
-                            min={pp.min}
-                            max={pp.max}
-                            step={pp.step}
-                            onChange={(e) => updateParams(ind.uid, { [pp.key]: Number(e.target.value) })}
-                            className="w-14 rounded border border-edge bg-panel px-1 py-0.5 text-slate-200 outline-none focus:border-sky-600"
-                          />
-                        </label>
-                      ))}
+                  {editing === ind.uid && (
+                    <div className="mt-1 flex flex-col gap-1.5 border-t border-edge pt-1">
+                      {def.params?.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {def.params.map((pp) => (
+                            <label key={pp.key} className="flex items-center gap-1 text-[10px] text-slate-400">
+                              {pp.label}
+                              <input
+                                type="number"
+                                value={ind.params[pp.key]}
+                                min={pp.min}
+                                max={pp.max}
+                                step={pp.step}
+                                onChange={(e) => updateParams(ind.uid, { [pp.key]: Number(e.target.value) })}
+                                className="w-14 rounded border border-edge bg-panel px-1 py-0.5 text-slate-200 outline-none focus:border-sky-600"
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {(() => {
+                          let plots = []
+                          try {
+                            plots = def.compute(seriesRef.current || [], ind.params) || []
+                          } catch {
+                            plots = []
+                          }
+                          return plots.map((plot) => {
+                            const cur = ind.colors?.[plot.id] || plot.color || '#94a3b8'
+                            const hex = /^#[0-9a-fA-F]{6}$/.test(cur) ? cur : '#94a3b8'
+                            return (
+                              <label key={plot.id} className="flex items-center gap-1 text-[10px] text-slate-400">
+                                <input
+                                  type="color"
+                                  value={hex}
+                                  onChange={(e) => setIndColor(ind.uid, plot.id, e.target.value)}
+                                  title={`${plot.id} colour`}
+                                  className="h-4 w-6 cursor-pointer rounded border border-edge bg-transparent p-0"
+                                />
+                                {plots.length > 1 ? plot.id : 'Colour'}
+                              </label>
+                            )
+                          })
+                        })()}
+                      </div>
                     </div>
                   )}
                 </div>
