@@ -17,6 +17,7 @@ import { evalPine } from '../utils/pine'
 import { INDICATOR_PINE } from '../utils/pinescript'
 import IndicatorMenu from './IndicatorMenu'
 import CodeModal from './CodeModal'
+import { ChartDrawingLayer } from './ChartDrawingLayer'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const pad = (n) => String(n).padStart(2, '0')
@@ -82,6 +83,9 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
   const [patterns, setPatterns] = useState([]) // active pattern keys (markers on candles)
   const [patternCode, setPatternCode] = useState({}) // key -> edited Pine (overrides default detector)
   const [codeView, setCodeView] = useState(null) // open Pine modal descriptor
+  // Bumped whenever the drawing overlay must re-project: visible-range change (pan/zoom),
+  // container resize, or a series repaint. Passed to <ChartDrawingLayer redrawTick>.
+  const [drawTick, setDrawTick] = useState(0)
 
   // ----- Bar replay (reveal bars one per second from a chosen date) -----
   const [replayOpen, setReplayOpen] = useState(false) // control bar visible
@@ -225,6 +229,11 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
   )
   seriesRef.current = series
 
+  // Candle times currently on the chart (unix seconds, ascending) — the drawing overlay anchors
+  // in these units. Recomputes with `series` (so it tracks replay slicing); stable identity
+  // otherwise, so redrawTick-only re-renders don't churn the layer's projection callbacks.
+  const drawTimes = useMemo(() => series.map((c) => c.time), [series])
+
   // time -> index in `series`, so the OHLC readout can show the change vs the
   // previous bar's close (TradingView-style) in O(1) on hover/replay.
   const idxByTime = useMemo(() => {
@@ -367,8 +376,13 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
 
     const ro = new ResizeObserver(() => {
       chart.applyOptions({ width: el.clientWidth, height: el.clientHeight })
+      setDrawTick((t) => t + 1) // resize → drawing overlay must re-measure + re-project
     })
     ro.observe(el)
+
+    // Re-project the drawing overlay on any visible-range change (pan / zoom / scroll).
+    const bumpDraw = () => setDrawTick((t) => t + 1)
+    chart.timeScale().subscribeVisibleLogicalRangeChange(bumpDraw)
 
     // Re-skin the canvas when the template theme changes.
     const stopTheme = onThemeChange(() => chart.applyOptions(chartThemeOptions()))
@@ -376,6 +390,11 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
     return () => {
       ro.disconnect()
       stopTheme()
+      try {
+        chart.timeScale().unsubscribeVisibleLogicalRangeChange(bumpDraw)
+      } catch {
+        /* chart already disposed */
+      }
       chart.remove()
       chartRef.current = null
       candleRef.current = null
@@ -403,6 +422,7 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
 
     paint() // setData(new slice) — preserves the visible logical range
     setTip(null)
+    setDrawTick((t) => t + 1) // series repainted → drawing overlay must re-project
 
     if (chart && series.length) {
       if (!replayOn) {
@@ -608,6 +628,39 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
     const mid = (lr.from + lr.to) / 2
     const half = Math.max(2.5, ((lr.to - lr.from) / 2) * factor)
     ts.setVisibleLogicalRange({ from: mid - half, to: mid + half })
+  }
+
+  // Persistence scope for the drawing overlay: one key per instrument (guard nulls → 'spot').
+  const instrumentKey =
+    spot || !selection?.expiry || !selection?.strike || !selection?.type
+      ? 'spot'
+      : `${selection.expiry}_${selection.strike}${selection.type}`
+
+  // Magnet snap: given a data-anchor (time, price), return the nearest OHLC of the on-chart bar
+  // closest in time. Used by the drawing overlay when its Magnet toggle is on; no-op fallback
+  // (returns price unchanged) when there are no bars.
+  const snapPrice = (time, price) => {
+    const s = seriesRef.current
+    if (!s || s.length === 0) return price
+    let best = s[0]
+    let bestD = Math.abs(s[0].time - time)
+    for (let i = 1; i < s.length; i++) {
+      const d = Math.abs(s[i].time - time)
+      if (d < bestD) {
+        bestD = d
+        best = s[i]
+      }
+    }
+    let bp = best.open
+    let bd = Math.abs(best.open - price)
+    for (const v of [best.high, best.low, best.close]) {
+      const dd = Math.abs(v - price)
+      if (dd < bd) {
+        bd = dd
+        bp = v
+      }
+    }
+    return bp
   }
 
   return (
@@ -832,9 +885,23 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
       <div className="relative min-h-0 flex-1">
         <div ref={wrapRef} className="absolute inset-0" />
 
+        {/* TradingView-style drawing/annotation overlay (SVG inset-0 over the chart + a
+            top-left vertical toolbar). Anchored in data coords; re-projects on redrawTick. */}
+        {ready && (
+          <ChartDrawingLayer
+            getChart={() => chartRef.current}
+            getSeries={() => candleRef.current}
+            times={drawTimes}
+            instrumentKey={instrumentKey}
+            redrawTick={drawTick}
+            onZoom={(factor) => zoomBy(factor)}
+            snapPrice={snapPrice}
+          />
+        )}
+
         {ready ? (
           <>
-            <div className="pointer-events-none absolute left-3 top-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
+            <div className="pointer-events-none absolute left-12 top-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
               Price
             </div>
             <div
@@ -853,7 +920,7 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
 
         {/* Active indicator + pattern legend (with inline param editing) */}
         {ready && (indicators.length > 0 || patterns.length > 0) && (
-          <div className="absolute left-3 top-7 z-10 flex max-w-[70%] flex-col gap-1">
+          <div className="absolute left-12 top-7 z-10 flex max-w-[70%] flex-col gap-1">
             {indicators.map((ind) => {
               const def = INDICATORS[ind.key]
               if (!def) return null
