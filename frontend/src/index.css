@@ -159,6 +159,33 @@ body {
   backdrop-filter: blur(16px);
 }
 
+/* ── Cosmic theme: frosted panels floating on the live day/night CosmicSky canvas
+   (CosmicSky.jsx, mounted in main.jsx). The full-height view roots use `bg-ink`;
+   make it transparent so the fixed sky shows, and frost the panels so the moon /
+   sun glows behind them. Scoped to cosmic so the other 7 themes are untouched. ── */
+.cosmic-sky {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+:root[data-theme="cosmic"] .bg-ink {
+  background: transparent;
+}
+:root[data-theme="cosmic"] .bg-panel,
+:root[data-theme="cosmic"] .bg-panel2 {
+  -webkit-backdrop-filter: blur(14px) saturate(1.25);
+  backdrop-filter: blur(14px) saturate(1.25);
+}
+/* cosmic → DARK (night): translucent slate glass over the moon + stars. */
+:root[data-theme="cosmic"][data-mode="dark"] {
+  --opt-panel: rgba(12, 19, 33, 0.6);
+  --opt-panel2: rgba(20, 29, 44, 0.68);
+}
+
 /* Thin scrollbars track the theme. */
 ::-webkit-scrollbar {
   width: 9px;
@@ -339,9 +366,9 @@ h1 {
    Driven by the global Light/Dark toggle (data-mode on <html>).
    ============================================================================ */
 
-/* cosmic → LIGHT */
+/* cosmic → LIGHT (day): frosted white glass over the sun + clouds. */
 :root[data-theme="cosmic"][data-mode="light"] {
-  --opt-ink: #f6f8fc; --opt-canvas: #f6f8fc; --opt-panel: #ffffff; --opt-panel2: #f1f5f9; --opt-edge: rgba(15, 23, 42, 0.1);
+  --opt-ink: #f6f8fc; --opt-canvas: #f6f8fc; --opt-panel: rgba(255, 255, 255, 0.62); --opt-panel2: rgba(255, 255, 255, 0.78); --opt-edge: rgba(15, 23, 42, 0.12);
   --opt-ce: #eef4ff; --opt-pe: #fef2f2;
   --opt-text: #0f172a; --opt-muted: #475569; --opt-faint: #64748b;
   --opt-accent: #4f46e5; --opt-call: #0369a1; --opt-put: #c2410c; --opt-pos: #059669; --opt-neg: #e11d48; --opt-warn: #d97706;
