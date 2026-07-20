@@ -217,8 +217,9 @@ function Viewer({ userEmail }) {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-ink text-slate-200">
-      {/* Top app bar */}
-      <header className="flex items-center gap-4 border-b border-edge bg-panel px-4 py-2.5">
+      {/* Top app bar — relative + z-40 so the SearchBar dropdown (frosted panels are
+          stacking contexts under the cosmic theme) paints above the content below. */}
+      <header className="relative z-40 flex items-center gap-4 border-b border-edge bg-panel px-4 py-2.5">
         <div className="flex items-center gap-2">
           <span className="brand-mark h-[22px] w-[39px] shrink-0" aria-hidden />
           <div className="h-5 w-1.5 rounded-full bg-gradient-to-b from-sky-400 to-orange-400" />

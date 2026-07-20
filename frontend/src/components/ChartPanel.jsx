@@ -612,8 +612,9 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header bar */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-edge bg-panel px-4 py-2">
+      {/* Header bar — relative + z-30 so the IndicatorMenu dropdown (frosted panels
+          are stacking contexts under the cosmic theme) paints above the chart. */}
+      <div className="relative z-30 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-edge bg-panel px-4 py-2">
         <div className="text-sm font-semibold text-slate-100">
           {spot ? (
             <>
