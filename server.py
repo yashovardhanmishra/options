@@ -575,6 +575,32 @@ def spot():
     return read_spot()
 
 
+@app.get("/api/underlying")
+def underlying(date: str = Query(...), time: str | None = None):
+    """Nifty index spot at (date[,time]) + that day's OPEN — feeds the chain header.
+    `date`=YYYY-MM-DD, `time`=HH:MM (omit = end-of-day). Unix ts are IST-as-UTC, so a
+    plain wall-clock -> unix and a same-day window need no timezone math."""
+    import bisect
+    try:
+        s = read_spot()
+    except HTTPException:
+        return {"spot": None, "dayOpen": None}
+    t = s["t"]
+    day_start = int((pd.Timestamp(date) - EPOCH) / ONE_SEC)
+    lo = bisect.bisect_left(t, day_start)
+    hi = bisect.bisect_left(t, day_start + 86400)
+    if lo >= hi:
+        return {"spot": None, "dayOpen": None, "prevClose": None}
+    day_open = s["o"][lo]
+    prev_close = s["c"][lo - 1] if lo > 0 else None    # last print of the prior day
+    if time:
+        target = int((pd.Timestamp(f"{date} {time}") - EPOCH) / ONE_SEC)
+        j = min(max(bisect.bisect_right(t, target) - 1, lo), hi - 1)
+    else:
+        j = hi - 1
+    return {"spot": s["c"][j], "dayOpen": day_open, "prevClose": prev_close}
+
+
 @app.get("/api/search")
 def search(q: str = Query(...), limit: int = 40):
     """

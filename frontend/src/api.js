@@ -40,6 +40,10 @@ export const getChain = (expiry, date, time, oiBase) =>
 export const getChart = (expiry, strike, type) =>
   api.get('/api/chart', { params: { expiry, strike, type } }).then((r) => r.data)
 
+// Underlying index spot at (date[,time]) + that day's open — for the chain header.
+export const getUnderlying = (date, time) =>
+  api.get('/api/underlying', { params: { date, time: time || undefined } }).then((r) => r.data)
+
 // Nifty index (spot): columnar {t,o,h,l,c,v} -> candle rows (oi unused for spot).
 export const getSpot = () =>
   api.get('/api/spot').then((r) => {

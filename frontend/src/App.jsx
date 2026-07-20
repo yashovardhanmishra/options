@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { format, parse } from 'date-fns'
-import { getExpiries, getDates, getTimes, getChain } from './api'
+import { getExpiries, getDates, getTimes, getChain, getUnderlying } from './api'
 import OptionChain from './components/OptionChain'
+import ChainHeader from './components/ChainHeader'
 import ChartPanel from './components/ChartPanel'
 import SearchBar from './components/SearchBar'
 import ThemeSwitcher from './components/ThemeSwitcher'
@@ -104,6 +105,7 @@ function Viewer({ userEmail }) {
   const [time, setTime] = useState('') // '' = end-of-day (last row)
   const [oiBase, setOiBase] = useState('prev_close') // Chg OI baseline: prev_close | day_open
   const [chain, setChain] = useState([])
+  const [underlying, setUnderlying] = useState(null) // {spot, dayOpen, prevClose}
   const [chainLoading, setChainLoading] = useState(false)
   const [selection, setSelection] = useState(null) // { expiry, strike, type }
   const [chainOpen, setChainOpen] = useState(true) // left panel visible?
@@ -180,6 +182,21 @@ function Viewer({ userEmail }) {
       cancelled = true
     }
   }, [expiry, date, time, oiBase])
+
+  // underlying spot + day-open for the chain header (follows the same date/time)
+  useEffect(() => {
+    if (!date) {
+      setUnderlying(null)
+      return
+    }
+    let cancelled = false
+    getUnderlying(date, time)
+      .then((u) => !cancelled && setUnderlying(u))
+      .catch(() => !cancelled && setUnderlying(null))
+    return () => {
+      cancelled = true
+    }
+  }, [date, time])
 
   const handleChainSelect = (strike, type) =>
     setSelection({ expiry, strike, type })
@@ -270,6 +287,8 @@ function Viewer({ userEmail }) {
         {/* LEFT — option chain */}
         {chainOpen && (
           <section className="flex min-h-0 flex-1 flex-col border-r border-edge">
+            {/* summary strip: day open / spot / synth fut + total call/put OI */}
+            <ChainHeader chain={chain} underlying={underlying} expiry={expiry} />
             {/* chain controls */}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-edge bg-panel2 px-3 py-2 text-sm">
               <label className="flex items-center gap-1.5">

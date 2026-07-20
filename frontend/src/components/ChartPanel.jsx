@@ -598,6 +598,18 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
   const hasSelection = !!selection
   const ready = spot || hasSelection
 
+  // +/- zoom: widen (out) / narrow (in) the visible bar window around its centre.
+  const zoomBy = (factor) => {
+    const chart = chartRef.current
+    if (!chart) return
+    const ts = chart.timeScale()
+    const lr = ts.getVisibleLogicalRange()
+    if (!lr) return
+    const mid = (lr.from + lr.to) / 2
+    const half = Math.max(2.5, ((lr.to - lr.from) / 2) * factor)
+    ts.setVisibleLogicalRange({ from: mid - half, to: mid + half })
+  }
+
   return (
     <div className="flex h-full flex-col">
       {/* Header bar */}
@@ -693,6 +705,24 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
             >
               Reset
             </button>
+
+            {/* Zoom in / out */}
+            <div className="flex overflow-hidden rounded-md border border-edge" title="Zoom the chart">
+              <button
+                onClick={() => zoomBy(1.5)}
+                title="Zoom out"
+                className="bg-panel2 px-2.5 py-1 text-sm font-semibold leading-none text-slate-300 hover:bg-edge hover:text-white"
+              >
+                −
+              </button>
+              <button
+                onClick={() => zoomBy(0.7)}
+                title="Zoom in"
+                className="border-l border-edge bg-panel2 px-2.5 py-1 text-sm font-semibold leading-none text-slate-300 hover:bg-edge hover:text-white"
+              >
+                +
+              </button>
+            </div>
 
             <button
               onClick={() => setReplayOpen((v) => !v)}

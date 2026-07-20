@@ -59,9 +59,26 @@ export default function EquityCurve({ curve }) {
     if (eq.length) chartRef.current.timeScale().fitContent()
   }, [curve])
 
+  const zoomBy = (factor) => {
+    const chart = chartRef.current
+    if (!chart) return
+    const ts = chart.timeScale()
+    const lr = ts.getVisibleLogicalRange()
+    if (!lr) return
+    const mid = (lr.from + lr.to) / 2
+    const half = Math.max(2.5, ((lr.to - lr.from) / 2) * factor)
+    ts.setVisibleLogicalRange({ from: mid - half, to: mid + half })
+  }
+
   return (
     <div className="relative h-full w-full">
       <div ref={wrapRef} className="h-full w-full" />
+      {curve.length > 0 && (
+        <div className="absolute right-1.5 top-1.5 z-10 flex overflow-hidden rounded border border-edge/70 bg-panel2/80">
+          <button onClick={() => zoomBy(1.5)} title="Zoom out" className="px-1.5 py-0.5 text-xs font-semibold leading-none text-slate-300 hover:bg-edge hover:text-white">−</button>
+          <button onClick={() => zoomBy(0.7)} title="Zoom in" className="border-l border-edge/70 px-1.5 py-0.5 text-xs font-semibold leading-none text-slate-300 hover:bg-edge hover:text-white">+</button>
+        </div>
+      )}
       {curve.length === 0 && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-slate-600">
           Equity curve builds as the clock advances.
