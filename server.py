@@ -24,7 +24,7 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 try:
@@ -403,6 +403,21 @@ def _instrument_index():
 # --------------------------------------------------------------------------- #
 # Endpoints
 # --------------------------------------------------------------------------- #
+@app.get("/nifty-spot.csv")
+def nifty_spot_csv(request: Request):
+    """Public 1-min NIFTY spot CSV (datetime,open,high,low,close,volume) for the StratosAI
+    chart — replaces the retired Supabase storage URL, served same-origin from our own data.
+    ETag-revalidated so an unchanged file returns 304 (no ~21 MB re-download per load)."""
+    if not SPOT_CSV.is_file():
+        raise HTTPException(404, f"Spot data file not found at {SPOT_CSV}")
+    st = SPOT_CSV.stat()
+    etag = f'"{int(st.st_mtime)}-{int(st.st_size)}"'
+    headers = {"ETag": etag, "Cache-Control": "no-cache", "Access-Control-Allow-Origin": "*"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return FileResponse(str(SPOT_CSV), media_type="text/csv", headers=headers)
+
+
 @app.get("/api/expiries")
 def expiries():
     """All expiry folders across every year dir, sorted descending."""
