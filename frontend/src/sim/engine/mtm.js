@@ -4,8 +4,8 @@
 
 /**
  * Realized/unrealized P&L of one leg, in rupees:
- *   (price_now − entry_price) × side × lot_size × lots
- * side = +1 long, −1 short. Exact to the input precision (no approximation).
+ *   (price_now - entry_price) × side × lot_size × lots
+ * side = +1 long, -1 short. Exact to the input precision (no approximation).
  */
 export function legPnl({ entryPrice, priceNow, side, lotSize, lots }) {
   return (priceNow - entryPrice) * side * lotSize * lots

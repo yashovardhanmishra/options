@@ -32,7 +32,7 @@ export const expiryShort = (iso) => {
 
 const inr0 = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 })
 const inr1 = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 1 })
-export const money = (n) => (n == null || Number.isNaN(n) ? '—' : `${n < 0 ? '−' : ''}₹${inr0.format(Math.abs(n))}`)
+export const money = (n) => (n == null || Number.isNaN(n) ? '—' : `${n < 0 ? '-' : ''}₹${inr0.format(Math.abs(n))}`)
 export const num = (n, d = 0) => (n == null || Number.isNaN(n) ? '—' : (d ? inr1 : inr0).format(n))
 export const signed = (n, d = 0) => (n == null || Number.isNaN(n) ? '—' : (n > 0 ? '+' : '') + (d ? n.toFixed(d) : Math.round(n)))
 export const pnlCls = (n) => (n == null || n === 0 ? 'text-slate-300' : n > 0 ? 'text-emerald-400' : 'text-red-400')

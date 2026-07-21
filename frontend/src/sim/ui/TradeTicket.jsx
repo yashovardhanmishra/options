@@ -55,7 +55,7 @@ export default function TradeTicket({ pick, chainSnap, lotSize, onPlace, onClose
               onClick={() => setLots((l) => Math.max(1, l - 1))}
               className="flex h-7 w-7 items-center justify-center rounded border border-edge bg-panel2 text-lg font-bold leading-none text-slate-300 hover:bg-edge hover:text-white"
             >
-              −
+              -
             </button>
             <input
               type="number"

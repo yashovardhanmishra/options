@@ -41,7 +41,7 @@ export default function ChainHeader({ chain, underlying, expiry }) {
         if (d < best) { best = d; atm = r }
       }
     }
-    // Synthetic future from put-call parity: F ≈ K + (C − P) at the ATM strike.
+    // Synthetic future from put-call parity: F ≈ K + (C - P) at the ATM strike.
     const synthFut = atm ? atm.strike + (atm.ce.ltp - atm.pe.ltp) : null
     return { callOi, putOi, callChg, putChg, synthFut }
   }, [chain])

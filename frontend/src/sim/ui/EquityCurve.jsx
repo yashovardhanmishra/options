@@ -75,7 +75,7 @@ export default function EquityCurve({ curve }) {
       <div ref={wrapRef} className="h-full w-full" />
       {curve.length > 0 && (
         <div className="absolute right-1.5 top-1.5 z-10 flex overflow-hidden rounded border border-edge/70 bg-panel2/80">
-          <button onClick={() => zoomBy(1.5)} title="Zoom out" className="px-1.5 py-0.5 text-xs font-semibold leading-none text-slate-300 hover:bg-edge hover:text-white">−</button>
+          <button onClick={() => zoomBy(1.5)} title="Zoom out" className="px-1.5 py-0.5 text-xs font-semibold leading-none text-slate-300 hover:bg-edge hover:text-white">-</button>
           <button onClick={() => zoomBy(0.7)} title="Zoom in" className="border-l border-edge/70 px-1.5 py-0.5 text-xs font-semibold leading-none text-slate-300 hover:bg-edge hover:text-white">+</button>
         </div>
       )}

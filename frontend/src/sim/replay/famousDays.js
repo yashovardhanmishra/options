@@ -4,13 +4,13 @@
 // day's open; days outside the loaded dataset land on the nearest available data.
 
 export const FAMOUS_DAYS = [
-  { date: '2024-06-04', label: 'Election Result Crash', note: 'NIFTY −5.9% as the mandate surprised; huge intraday whipsaw.' },
+  { date: '2024-06-04', label: 'Election Result Crash', note: 'NIFTY -5.9% as the mandate surprised; huge intraday whipsaw.' },
   { date: '2024-06-03', label: 'Exit-Poll Rally', note: 'NIFTY +3.3% on exit-poll euphoria — the day before the crash.' },
-  { date: '2024-08-05', label: 'Global Selloff', note: 'Yen carry-trade unwind; NIFTY gapped down ~−2.7%.' },
-  { date: '2022-02-24', label: 'Russia–Ukraine War', note: 'Invasion day; NIFTY −4.8% on the open.' },
+  { date: '2024-08-05', label: 'Global Selloff', note: 'Yen carry-trade unwind; NIFTY gapped down ~-2.7%.' },
+  { date: '2022-02-24', label: 'Russia–Ukraine War', note: 'Invasion day; NIFTY -4.8% on the open.' },
   { date: '2021-02-01', label: 'Budget Rally', note: 'Union Budget 2021; NIFTY +4.7%, one of the best budget days.' },
-  { date: '2021-11-26', label: 'Omicron Scare', note: 'New-variant fear; NIFTY −2.9% in a sharp risk-off.' },
-  { date: '2020-03-23', label: 'COVID Crash Low', note: 'Pandemic capitulation; NIFTY −13% intraday to the bottom.' },
+  { date: '2021-11-26', label: 'Omicron Scare', note: 'New-variant fear; NIFTY -2.9% in a sharp risk-off.' },
+  { date: '2020-03-23', label: 'COVID Crash Low', note: 'Pandemic capitulation; NIFTY -13% intraday to the bottom.' },
   { date: '2020-03-24', label: 'COVID Bounce', note: 'Stimulus hopes; NIFTY +6.6% off the low.' },
   { date: '2020-04-07', label: 'Lockdown Rally', note: 'NIFTY +8.8% on flattening-curve hopes.' },
   { date: '2023-09-15', label: 'Record-High Run', note: 'NIFTY pushing all-time highs in a strong trend day.' },

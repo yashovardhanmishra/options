@@ -12,7 +12,7 @@ const METRICS = [
 
 const PNL_FIELDS = [
   { key: 'target', label: 'Target', hint: 'book profit at +₹' },
-  { key: 'maxLoss', label: 'Stop loss', hint: 'cut loss at −₹' },
+  { key: 'maxLoss', label: 'Stop loss', hint: 'cut loss at -₹' },
   { key: 'trailing', label: 'Trailing', hint: 'give-back ₹ from peak' },
 ]
 

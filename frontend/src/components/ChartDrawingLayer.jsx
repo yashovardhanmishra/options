@@ -689,7 +689,7 @@ export function ChartDrawingLayer({
             {`${d.type.toUpperCase()}  +${stats.rewardPct.toFixed(1)}%`}
           </text>
           <text x={lx + 6} y={ly + 26} fontSize={10} fontFamily="JetBrains Mono, monospace" fill={`rgba(${R},1)`}>
-            {`stop  −${stats.riskPct.toFixed(1)}%`}
+            {`stop  -${stats.riskPct.toFixed(1)}%`}
           </text>
           <text x={lx + 6} y={ly + 38} fontSize={10} fontFamily="JetBrains Mono, monospace" fill="#eef2ff">
             {`R:R  ${stats.rr != null ? stats.rr.toFixed(2) : "—"} : 1`}

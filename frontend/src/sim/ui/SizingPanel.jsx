@@ -62,7 +62,7 @@ export default function SizingPanel({ book, payoff, margin }) {
         <Row label="Long premium">{money(margin?.premium ?? 0)}</Row>
         {margin?.benefit > 0 && (
           <Row label="Hedge benefit">
-            <span className="text-emerald-400">−{money(margin.benefit)}</span>
+            <span className="text-emerald-400">-{money(margin.benefit)}</span>
           </Row>
         )}
         <div className="my-1 h-px bg-edge" />

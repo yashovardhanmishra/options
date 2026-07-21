@@ -39,7 +39,7 @@ export const EXPLAINERS = {
   // ── StrategyStats / payoff terms (field names from strategySummary in payoff.js)
   pnl: {
     t: 'P&L (MTM)',
-    d: 'Your live mark-to-market profit/loss on open positions — (current mark − entry) × quantity. It updates every tick as the replay clock scrubs.',
+    d: 'Your live mark-to-market profit/loss on open positions — (current mark - entry) × quantity. It updates every tick as the replay clock scrubs.',
   },
   maxProfit: {
     t: 'Max Profit',

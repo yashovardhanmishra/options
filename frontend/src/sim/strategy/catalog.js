@@ -201,7 +201,7 @@ export function inferStep(chain) {
   return best
 }
 
-/** ATM strike: the strike where |CE−PE| is smallest (put-call parity). Falls back to the
+/** ATM strike: the strike where |CE-PE| is smallest (put-call parity). Falls back to the
  *  strike nearest spot S, then to the mid of the strike range. */
 export function atmStrikeOf(chain, S) {
   if (!chain || chain.length === 0) return null

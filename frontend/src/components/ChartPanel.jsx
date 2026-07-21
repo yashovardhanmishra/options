@@ -767,7 +767,7 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
                 title="Zoom out"
                 className="bg-panel2 px-2.5 py-1 text-sm font-semibold leading-none text-slate-300 hover:bg-edge hover:text-white"
               >
-                −
+                -
               </button>
               <button
                 onClick={() => zoomBy(0.7)}

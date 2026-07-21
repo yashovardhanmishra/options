@@ -20,12 +20,12 @@ const OUTLOOK = {
   vol: { label: 'Volatility', cls: 'bg-violet-600/20 text-violet-300' },
 }
 
-/** Compact leg chip: "−2 22000 CE" coloured by side + option type. */
+/** Compact leg chip: "-2 22000 CE" coloured by side + option type. */
 function LegChip({ spec }) {
   const long = spec.side > 0
   return (
     <span className="inline-flex items-center gap-0.5 rounded bg-panel px-1 py-0.5 font-mono text-[10px]">
-      <span className={long ? 'text-emerald-400' : 'text-red-400'}>{long ? '+' : '−'}{spec.lots}</span>
+      <span className={long ? 'text-emerald-400' : 'text-red-400'}>{long ? '+' : '-'}{spec.lots}</span>
       <span className="text-slate-300">{spec.strike}</span>
       <span className={spec.type === 'CE' ? 'text-sky-400' : 'text-orange-400'}>{spec.type}</span>
     </span>
@@ -131,7 +131,7 @@ export default function StrategyPicker({ sim, onClose }) {
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-edge bg-panel2 px-4 py-2.5">
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <span>Lots</span>
-            <button onClick={() => setLots((l) => Math.max(1, l - 1))} className="flex h-6 w-6 items-center justify-center rounded border border-edge bg-panel text-sm font-bold leading-none text-slate-300 hover:bg-edge hover:text-white">−</button>
+            <button onClick={() => setLots((l) => Math.max(1, l - 1))} className="flex h-6 w-6 items-center justify-center rounded border border-edge bg-panel text-sm font-bold leading-none text-slate-300 hover:bg-edge hover:text-white">-</button>
             <span className="w-6 text-center font-mono text-slate-100">{lots}</span>
             <button onClick={() => setLots((l) => l + 1)} className="flex h-6 w-6 items-center justify-center rounded border border-edge bg-panel text-sm font-bold leading-none text-slate-300 hover:bg-edge hover:text-white">+</button>
           </div>

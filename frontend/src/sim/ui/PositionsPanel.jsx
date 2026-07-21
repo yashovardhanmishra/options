@@ -71,7 +71,7 @@ export default function PositionsPanel({ book, multiplier = 1, setMultiplier, on
                               title="Fewer lots to exit"
                               className="flex h-4 w-4 cursor-pointer items-center justify-center rounded border border-edge bg-panel2 text-[11px] leading-none text-slate-400 hover:bg-edge hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-panel2 disabled:hover:text-slate-400"
                             >
-                              −
+                              -
                             </button>
                             <span className="w-5 text-center text-[10px] text-slate-300">{xl}</span>
                             <button
@@ -105,7 +105,7 @@ export default function PositionsPanel({ book, multiplier = 1, setMultiplier, on
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-edge bg-panel2 px-3 py-1.5 text-[11px]">
         <div className="flex items-center gap-1">
           <span className="text-slate-500">Multiplier</span>
-          <button onClick={() => setMultiplier((m) => Math.max(1, m - 1))} className="h-5 w-5 rounded border border-edge bg-panel text-slate-300 hover:bg-edge">−</button>
+          <button onClick={() => setMultiplier((m) => Math.max(1, m - 1))} className="h-5 w-5 rounded border border-edge bg-panel text-slate-300 hover:bg-edge">-</button>
           <span className="w-6 text-center font-mono text-slate-200">{multiplier}</span>
           <button onClick={() => setMultiplier((m) => m + 1)} className="h-5 w-5 rounded border border-edge bg-panel text-slate-300 hover:bg-edge">+</button>
         </div>
