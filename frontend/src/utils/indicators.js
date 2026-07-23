@@ -16,6 +16,7 @@ export const CATEGORIES = [
   'Momentum',
   'Volatility',
   'Volume',
+  'Bar Statistics',
   'Support/Resistance & Other',
 ]
 
@@ -201,6 +202,22 @@ const len = (def = 20) => ({ key: 'length', label: 'Length', default: def, min: 
 // ---------------------------------------------------------------- registry
 // Order within each category drives the menu listing.
 export const INDICATORS = {
+  // ---- Bar Statistics (per-candle price derivations, no params) ----
+  typicalbar: {
+    key: 'typicalbar', name: 'Typical Bar Average (HLC/3)', category: 'Bar Statistics', overlay: true,
+    params: [], label: () => 'Typical (HLC/3)',
+    compute: (c) => [line(c, c.map((x) => (x.high + x.low + x.close) / 3), 'typicalbar', C.blue)],
+  },
+  bodyavg: {
+    key: 'bodyavg', name: 'Body Average ((O-C)/2)', category: 'Bar Statistics', overlay: false,
+    params: [], refs: [{ value: 0, color: '#475569' }], label: () => 'Body (O-C)/2',
+    compute: (c) => [line(c, c.map((x) => (x.open - x.close) / 2), 'bodyavg', C.pink)],
+  },
+  rangeavg: {
+    key: 'rangeavg', name: 'Range Average ((H-L)/2)', category: 'Bar Statistics', overlay: false,
+    params: [], label: () => 'Range (H-L)/2',
+    compute: (c) => [line(c, c.map((x) => (x.high - x.low) / 2), 'rangeavg', C.teal)],
+  },
   // ---- Trend ----
   sma: {
     key: 'sma', name: 'Simple Moving Average (SMA)', category: 'Trend', overlay: true,
