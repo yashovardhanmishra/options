@@ -46,29 +46,41 @@ export function tfToSeconds(tf) {
 // NSE cash/index session opens at 09:15 IST. Intraday bars are anchored to that
 // open (09:15–10:15, 10:15–11:15, …) rather than the clock hour, matching how
 // Indian charting platforms bucket intraday candles.
-const SESSION_OPEN_SEC = 9 * 3600 + 15 * 60 // 33300 (09:15 from IST midnight)
-// NSE session spans 09:15 → 15:30 IST (6h15m). The 15:30:00 print is the CLOSING
-// tick, not the open of a new bar — some days include it, some don't. Fold it (and
-// anything at/after it) into the last in-session bar so it never spawns a lone
-// 15:30 candle on the timeframes where 22500 is a whole multiple of the step (5m/15m).
-const SESSION_LEN_SEC = 6 * 3600 + 15 * 60 // 22500 (09:15 → 15:30)
+//
+// The window is a PARAMETER because not every instrument trades NSE hours: MCX energy
+// (natural gas) runs 09:00 → 23:30/23:55 IST. Every caller that omits it gets the NSE
+// window, so the option-chain + Nifty-spot charts are unchanged.
+// A session spans [openSec, openSec + lenSec). The closing print is the CLOSE tick, not
+// the open of a new bar — some days include it, some don't. Fold it (and anything after)
+// into the last in-session bar so it never spawns a lone closing candle on timeframes
+// where lenSec is a whole multiple of the step.
+export const NSE_SESSION = {
+  openSec: 9 * 3600 + 15 * 60, // 33300 (09:15 from IST midnight)
+  lenSec: 6 * 3600 + 15 * 60, // 22500 (09:15 → 15:30)
+}
+// MCX energy (natural gas): 09:00 IST through end of day — covers both the 23:30 winter
+// close and the 23:55 summer close without truncating either.
+export const MCX_ENERGY_SESSION = {
+  openSec: 9 * 3600, // 32400 (09:00)
+  lenSec: 15 * 3600, // 09:00 → 24:00
+}
 
 // Start of the bucket `time` falls into for interval `step` (seconds). Intraday
-// (< 1 day) anchors to each IST day's 09:15 open; daily and above floor to IST
+// (< 1 day) anchors to each IST day's session open; daily and above floor to IST
 // midnight (the calendar trading day).
-export function bucketStart(time, step) {
+export function bucketStart(time, step, session = NSE_SESSION) {
   if (step >= 86400) return Math.floor(time / step) * step
   const dayStart = Math.floor(time / 86400) * 86400
-  const open = dayStart + SESSION_OPEN_SEC
+  const open = dayStart + session.openSec
   const off = time - open
   if (off < 0) return open // fold any pre-open ticks into the first session bar
-  // Clamp to the last bucket that OPENS inside the session so the 15:30 close folds
-  // into it (e.g. 15m: last open = 15:15, never a fresh 15:30 bar).
-  const lastOff = Math.floor((SESSION_LEN_SEC - 1) / step) * step
+  // Clamp to the last bucket that OPENS inside the session so the closing print folds
+  // into it (e.g. NSE 15m: last open = 15:15, never a fresh 15:30 bar).
+  const lastOff = Math.floor((session.lenSec - 1) / step) * step
   return open + Math.min(Math.floor(off / step) * step, lastOff)
 }
 
-export function resample(raw, tf) {
+export function resample(raw, tf, session = NSE_SESSION) {
   if (!raw || raw.length === 0) return []
 
   const step = tfToSeconds(tf)
@@ -78,8 +90,8 @@ export function resample(raw, tf) {
   const order = []
 
   for (const c of raw) {
-    // Anchor intraday buckets to the 09:15 session open (1D -> IST midnight).
-    const bt = bucketStart(c.time, step)
+    // Anchor intraday buckets to the session open (1D -> IST midnight).
+    const bt = bucketStart(c.time, step, session)
     let b = buckets.get(bt)
     if (!b) {
       b = {

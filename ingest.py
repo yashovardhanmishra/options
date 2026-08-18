@@ -53,7 +53,10 @@ SELECT * FROM (
     -- silently swapping fields (volume<->OI etc.) for any file with a different
     -- column order. all_varchar + explicit TRY_CASTs keep the typing deterministic.
     FROM read_csv('__GLOB__', filename = true, header = true, ignore_errors = true,
-         store_rejects = true, union_by_name = true, all_varchar = true)
+         union_by_name = true, all_varchar = true)
+         -- store_rejects was dropped: newer DuckDB rejects REJECTS_TABLE together with
+         -- UNION_BY_NAME, and union_by_name is the load-bearing one (positional binding
+         -- silently swaps volume<->OI). The reject count below just reports None now.
   )
   -- OHLC must be complete (the API float()s them — a NULL crashed /api/chart in DB mode);
   -- rows the CSV fallback would dropna are dropped here too, so both modes agree.
@@ -82,6 +85,10 @@ def main():
     tmp.mkdir(exist_ok=True)
     con.execute(f"SET temp_directory = '{tmp}'")
     con.execute(f"SET memory_limit = '{os.environ.get('DUCKDB_MEMORY_LIMIT', '6GB')}'")
+    # Thread count multiplies DuckDB's per-thread buffers, which is what actually OOMs a
+    # small box (the Vultr host has 3GB total, so the 6GB default limit was unreachable).
+    # Fewer threads + a limit UNDER physical RAM makes it spill to temp_directory instead.
+    con.execute(f"SET threads = {os.environ.get('DUCKDB_THREADS', '4')}")
 
     # bars is written clustered by expiry (see ORDER BY in BUILD_SQL), so queries
     # that filter by expiry prune via DuckDB's min/max zonemaps — fast, and with no

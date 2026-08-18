@@ -464,3 +464,71 @@ h1 {
           mask: url("/logo-mask.png") center / contain no-repeat;
   filter: drop-shadow(0 0 4px var(--brand-mark-glow)) drop-shadow(0 0 10px var(--brand-mark-glow));
 }
+
+/* ── TOUCH: let the CHART own one-finger gestures (mobile pan / pinch-zoom) ──────────────
+   lightweight-charts leaves `touch-action: auto` on its container + canvases, so on a phone
+   the BROWSER claims a one-finger drag for page panning. The app shell is `h-screen
+   overflow-hidden` (there is nothing to scroll), so the drag did nothing at all and the chart
+   felt LOCKED — it could not be panned or pinch-zoomed by touch. `touch-action: none` hands
+   the gesture to the chart, which implements pan + pinch itself (same as TradingView).
+   Applies to every chart in the app (strike chart, Nifty spot, replay) since they all render
+   through ChartPanel's lightweight-charts instance. Desktop mouse/wheel is unaffected. ── */
+.tv-lightweight-charts,
+.tv-lightweight-charts canvas {
+  touch-action: none;
+}
+
+/* The chain table scrolls horizontally on narrow screens (the flex parents carry min-w-0 so it
+   CAN overflow) — keep that a smooth one-finger horizontal pan and stop it rubber-banding the
+   whole page at the ends. */
+.chain-scroll {
+  touch-action: pan-x pan-y;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ═══ FLAT, APP-WIDE (chain · chart · replay · spot · sim) ════════════════════════════════════
+   Plain everywhere, on every theme. The raised look here is THEME chrome, not layout: neumorphic
+   paints its signature extruded double shadow on .bg-panel2, glass/y2k/cosmic frost the panels
+   with a backdrop blur, and y2k/neumorphic/glass each inflate the corner radii. Together they read
+   as claymorphism — panels moulded above the page instead of drawn on it.
+
+   This block keeps every theme's COLOUR palette (that's what the switcher is for) and removes only
+   the depth cues, matching the flat treatment applied to StratosAI. `!important` is required
+   because the per-theme rules it overrides are themselves `!important`; it is appended LAST so it
+   wins on source order too. `rounded-full` is deliberately NOT flattened — avatars, dots and OI
+   bars are meant to be round. Delete this block to give the themes their chrome back.
+
+   Precedent: the built-in `swiss` theme already does exactly this radius reset. */
+:is(.rounded, .rounded-sm, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl),
+.bg-panel,
+.bg-panel2 {
+  border-radius: 0 !important;
+}
+.bg-panel,
+.bg-panel2,
+.shadow,
+.shadow-sm,
+.shadow-md,
+.shadow-lg,
+.shadow-xl {
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* Four themes (cosmic, glass, y2k, mesh) paint TRANSLUCENT panels and leaned on the backdrop blur
+   to stay legible — cosmic literally frosts the live star/moon canvas behind the option chain.
+   Removing the blur alone would leave the raw background showing straight THROUGH the data (the
+   moon reads across the strike rows). Composite each panel over the theme's own canvas colour so
+   it renders fully opaque, without hand-picking a replacement colour for every theme: the bottom
+   layer is --opt-canvas, the top layer is the panel's own (possibly translucent) token. The sky /
+   gradient still shows as the page canvas around the panels — it just no longer bleeds into them. */
+.bg-panel {
+  background-color: var(--opt-canvas) !important;
+  background-image: linear-gradient(var(--opt-panel), var(--opt-panel)) !important;
+}
+.bg-panel2 {
+  background-color: var(--opt-canvas) !important;
+  background-image: linear-gradient(var(--opt-panel2), var(--opt-panel2)) !important;
+}

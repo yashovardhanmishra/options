@@ -47,6 +47,18 @@ FRONTEND_DIR = Path(os.environ.get("FRONTEND_DIR") or Path(__file__).resolve().p
 # nifty.csv next to the data; override with SPOT_CSV.
 SPOT_CSV = Path(os.environ.get("SPOT_CSV") or (DATA_DIR / "nifty.csv"))
 
+# MCX natural gas 5-min OHLCV CSV. Same shape as the spot file (Datetime,Open,High,Low,
+# Close,Volume[,OI]) so it goes through the identical parser/endpoints; override with
+# NATGAS_CSV. Session is 09:00-23:30/23:55 IST, NOT the 09:15-15:30 equity window.
+NATGAS_CSV = Path(os.environ.get("NATGAS_CSV") or (DATA_DIR / "naturalgas_5min.csv"))
+
+# Every instrument the chart tools can load, keyed by the id the frontends use.
+# `csv` is the file; `route` is the public raw-CSV path StratosAI fetches.
+INSTRUMENTS = {
+    "nifty": {"csv": SPOT_CSV, "label": "NIFTY 50", "route": "/nifty-spot.csv"},
+    "naturalgas": {"csv": NATGAS_CSV, "label": "Natural Gas", "route": "/naturalgas-5min.csv"},
+}
+
 # How many of the newest expiries to pre-parse on startup (warms the cache so the
 # first page load is fast). Set WARM_EXPIRIES=0 to disable.
 WARM_EXPIRIES = int(os.environ.get("WARM_EXPIRIES", "2"))
@@ -141,6 +153,36 @@ except Exception:
     _DB = None
 
 USING_DB = _DB is not None
+
+
+# ── DB freshness gate ──────────────────────────────────────────────────────────────────
+# The DuckDB is a BUILT ARTIFACT: it only knows the expiries present when it was ingested.
+# When fresh CSVs land (a new expiry folder), the DB is silently stale and every DB-backed
+# endpoint hides that data — the expiry doesn't even appear in the dropdown. So each request
+# asks whether the DB actually covers THAT expiry and falls back to the CSV reader when it
+# doesn't. New data is live the moment the files land; re-ingesting only makes it faster.
+_DB_EXPIRIES = None
+
+
+def _db_expiry_set():
+    """Expiries present in the DB (cached once per process)."""
+    global _DB_EXPIRIES
+    if _DB_EXPIRIES is None:
+        try:
+            rows = _DB.execute("SELECT DISTINCT expiry FROM dim_instruments").fetchall()
+            _DB_EXPIRIES = {str(r[0]) for r in rows}
+        except Exception:
+            _DB_EXPIRIES = set()
+    return _DB_EXPIRIES
+
+
+def _use_db(expiry=None):
+    """True when the DB can serve this request (it exists AND covers this expiry)."""
+    if not USING_DB:
+        return False
+    if expiry is None:
+        return True
+    return str(expiry) in _db_expiry_set()
 
 
 def _q(sql, params=()):
@@ -351,20 +393,30 @@ def read_csv(path: Path) -> pd.DataFrame:
     return _parse_csv(str(path), path.stat().st_mtime)
 
 
-@lru_cache(maxsize=1)
+# One cache slot per instrument (nifty spot + natural gas); keyed by path+mtime, so a
+# rebuilt file re-parses on its own.
+@lru_cache(maxsize=4)
 def _read_spot(path_str: str, _mtime: float):
-    """Parse the Nifty index 1-min OHLCV CSV into columnar arrays (cached once).
+    """Parse an OHLCV bar CSV into columnar arrays (cached per file).
     Accepts `datetime,open,high,low,close[,volume]` (ISO) or
-    `Date,Time,Open,High,Low,Close[,Volume]` (DD/MM/YYYY)."""
+    `Date,Time,Open,High,Low,Close[,Volume]` (DD/MM/YYYY). Used for the Nifty index
+    1-min spot file AND the MCX natural-gas 5-min file — identical layout."""
     df = pd.read_csv(path_str)
     df.columns = [c.strip().lower() for c in df.columns]
     if "datetime" in df.columns:
         dt = pd.to_datetime(df["datetime"].astype(str).str.strip(), errors="coerce")
     else:
-        dt = pd.to_datetime(
-            df["date"].astype(str).str.strip() + " " + df["time"].astype(str).str.strip(),
-            format="%d/%m/%Y %H:%M:%S", errors="coerce",
-        )
+        # Date+Time come in BOTH conventions across our sources: DD/MM/YYYY (the per-strike
+        # option CSVs) and YYYY-MM-DD (the 2021-2026 spot export). Try the explicit
+        # day-first format, then fall back to ISO for whatever it couldn't parse, so a
+        # single pinned format can never silently drop the entire file to NaT.
+        stamp = df["date"].astype(str).str.strip() + " " + df["time"].astype(str).str.strip()
+        dt = pd.to_datetime(stamp, format="%d/%m/%Y %H:%M:%S", errors="coerce")
+        if dt.isna().any():
+            iso = pd.to_datetime(stamp[dt.isna()], format="%Y-%m-%d %H:%M:%S", errors="coerce")
+            dt = dt.fillna(iso)
+        if dt.isna().any():  # last resort: let pandas infer the stragglers
+            dt = dt.fillna(pd.to_datetime(stamp[dt.isna()], errors="coerce"))
     df = df.assign(__dt=dt).dropna(subset=["__dt", "open", "high", "low", "close"])
     df = df.sort_values("__dt").drop_duplicates(subset="__dt", keep="last")
     unix = ((df["__dt"] - EPOCH) // ONE_SEC).astype("int64")
@@ -379,10 +431,15 @@ def _read_spot(path_str: str, _mtime: float):
     }
 
 
+def read_bars(csv_path: Path, label: str):
+    """Columnar {t,o,h,l,c,v} for any instrument CSV, cached by path+mtime."""
+    if not csv_path.is_file():
+        raise HTTPException(404, f"{label} data file not found at {csv_path}")
+    return _read_spot(str(csv_path), csv_path.stat().st_mtime)
+
+
 def read_spot():
-    if not SPOT_CSV.is_file():
-        raise HTTPException(404, f"Spot data file not found at {SPOT_CSV}")
-    return _read_spot(str(SPOT_CSV), SPOT_CSV.stat().st_mtime)
+    return read_bars(SPOT_CSV, "Spot")
 
 
 @lru_cache(maxsize=1)
@@ -403,27 +460,56 @@ def _instrument_index():
 # --------------------------------------------------------------------------- #
 # Endpoints
 # --------------------------------------------------------------------------- #
-@app.get("/nifty-spot.csv")
-def nifty_spot_csv(request: Request):
-    """Public 1-min NIFTY spot CSV (datetime,open,high,low,close,volume) for the StratosAI
-    chart — replaces the retired Supabase storage URL, served same-origin from our own data.
-    ETag-revalidated so an unchanged file returns 304 (no ~21 MB re-download per load)."""
-    if not SPOT_CSV.is_file():
-        raise HTTPException(404, f"Spot data file not found at {SPOT_CSV}")
-    st = SPOT_CSV.stat()
+def _raw_csv_response(request: Request, csv_path: Path, label: str):
+    """Serve a raw instrument CSV to the StratosAI chart/backtester, same-origin from our own
+    data (replaces the retired Supabase storage URL). ETag-revalidated so an unchanged file
+    returns 304 (no ~21 MB re-download per load)."""
+    if not csv_path.is_file():
+        raise HTTPException(404, f"{label} data file not found at {csv_path}")
+    st = csv_path.stat()
     etag = f'"{int(st.st_mtime)}-{int(st.st_size)}"'
     headers = {"ETag": etag, "Cache-Control": "no-cache", "Access-Control-Allow-Origin": "*"}
-    if request.headers.get("if-none-match") == etag:
+    # If-None-Match may be a comma-separated list and each entry may carry a W/ weak prefix
+    # (proxies weaken ETags when they re-encode) — an exact-string compare never 304s there,
+    # silently re-sending ~21 MB per load.
+    inm = request.headers.get("if-none-match") or ""
+    client_tags = {v.strip().removeprefix("W/") for v in inm.split(",") if v.strip()}
+    if etag in client_tags or "*" in client_tags:
         return Response(status_code=304, headers=headers)
-    return FileResponse(str(SPOT_CSV), media_type="text/csv", headers=headers)
+    # PRE-COMPRESSED FAST PATH. Caddy's `encode gzip` was re-compressing this ~28 MB file on
+    # EVERY request: measured 0.09s uncompressed vs 7.33s gzipped through the proxy on this
+    # 2-core box, and browsers always send Accept-Encoding: gzip — so every chart load paid
+    # ~7s of server CPU. Serving a .gz built once by the daily updater turns that into a
+    # plain file send. Caddy leaves responses that already carry Content-Encoding alone.
+    # Guard: only use the .gz when it is NEWER than the CSV, so a stale sidecar (e.g. the
+    # updater died midway) can never serve yesterday's data — it just falls back.
+    gz = csv_path.with_suffix(csv_path.suffix + ".gz")
+    accepts_gzip = "gzip" in (request.headers.get("accept-encoding") or "").lower()
+    if accepts_gzip and gz.is_file() and gz.stat().st_mtime >= st.st_mtime:
+        return FileResponse(
+            str(gz),
+            media_type="text/csv",
+            headers={**headers, "Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
+        )
+    return FileResponse(str(csv_path), media_type="text/csv", headers=headers)
+
+
+@app.get("/nifty-spot.csv")
+def nifty_spot_csv(request: Request):
+    """Public 1-min NIFTY spot CSV (datetime,open,high,low,close,volume)."""
+    return _raw_csv_response(request, SPOT_CSV, "Spot")
+
+
+@app.get("/naturalgas-5min.csv")
+def naturalgas_csv(request: Request):
+    """Public 5-min MCX natural-gas CSV (datetime,open,high,low,close,volume,oi)."""
+    return _raw_csv_response(request, NATGAS_CSV, "Natural gas")
 
 
 @app.get("/api/expiries")
 def expiries():
     """All expiry folders across every year dir, sorted descending."""
-    if USING_DB:
-        return _db_expiries()
-    found = set()
+    found = set(_db_expiries()) if USING_DB else set()
     for year_dir in _year_dirs():
         for d in year_dir.iterdir():
             if d.is_dir() and EXPIRY_RE.match(d.name):
@@ -434,7 +520,7 @@ def expiries():
 @app.get("/api/dates")
 def dates(expiry: str = Query(...)):
     """Unique trading dates (ISO YYYY-MM-DD) available in an expiry folder, ascending."""
-    if USING_DB:
+    if _use_db(expiry):
         return _db_dates(expiry)
     folder = find_expiry_dir(expiry)
     found = set()
@@ -447,7 +533,7 @@ def dates(expiry: str = Query(...)):
 @app.get("/api/times")
 def times(expiry: str = Query(...), date: str = Query(...)):
     """Unique intraday times (HH:MM) traded on `date`, across all strikes, ascending."""
-    if USING_DB:
+    if _use_db(expiry):
         return _db_times(expiry, date)
     folder = find_expiry_dir(expiry)
     found = set()
@@ -481,7 +567,7 @@ def chain(
         raise HTTPException(400, f"Invalid time {time!r}; expected HH:MM")
     if oi_base not in ("prev_close", "day_open"):
         oi_base = "prev_close"
-    if USING_DB:
+    if _use_db(expiry):
         return _db_chain(expiry, date, hm, oi_base)
     folder = find_expiry_dir(expiry)
     strikes: dict[int, dict] = {}
@@ -529,7 +615,7 @@ def chart(expiry: str = Query(...), strike: int = Query(...), type: str = Query(
     if side not in ("CE", "PE"):
         raise HTTPException(400, "type must be CE or PE")
 
-    if USING_DB:
+    if _use_db(expiry):
         return _db_chart(expiry, strike, side)
 
     folder = find_expiry_dir(expiry)
@@ -563,7 +649,7 @@ def chart(expiry: str = Query(...), strike: int = Query(...), type: str = Query(
 def chain_day(expiry: str = Query(...), date: str = Query(...)):
     """Bulk replay feed: every strike's 1-min bars for one (expiry, date).
     {expiry, date, instruments:[{strike, type, bars:[[unix,o,h,l,c,v,oi], ...]}]}."""
-    if USING_DB:
+    if _use_db(expiry):
         return _db_chain_day(expiry, date)
     return _csv_chain_day(expiry, date)
 
@@ -573,6 +659,31 @@ def spot():
     """Full 1-min Nifty index (spot) history as columnar arrays {t,o,h,l,c,v}.
     Columnar keeps the payload small; the frontend zips it into candles."""
     return read_spot()
+
+
+@app.get("/api/instruments")
+def instruments():
+    """Instruments the chart's market dropdown can offer. `available` is false when the
+    CSV isn't on this box, so the frontend can grey the entry out instead of erroring."""
+    return [
+        {
+            "id": key,
+            "label": inst["label"],
+            "route": inst["route"],
+            "available": inst["csv"].is_file(),
+        }
+        for key, inst in INSTRUMENTS.items()
+    ]
+
+
+@app.get("/api/bars")
+def bars(instrument: str = Query("nifty")):
+    """Full history for any registered instrument as columnar arrays {t,o,h,l,c,v} —
+    the market-agnostic sibling of /api/spot (which stays for existing callers)."""
+    inst = INSTRUMENTS.get(instrument)
+    if not inst:
+        raise HTTPException(404, f"Unknown instrument '{instrument}'")
+    return read_bars(inst["csv"], inst["label"])
 
 
 @app.get("/api/underlying")
@@ -591,7 +702,13 @@ def underlying(date: str = Query(...), time: str | None = None):
     hi = bisect.bisect_left(t, day_start + 86400)
     if lo >= hi:
         return {"spot": None, "dayOpen": None, "prevClose": None}
-    day_open = s["o"][lo]
+    # "Day Open" = the 09:15 session open, not the day's first CSV row — the file carries
+    # pre-market rows on some days (07:06/09:00/09:11 flat prints at ~prev close), which made
+    # dayOpen ≈ prevClose and the day's change read ~0. Fall back to the first row only when
+    # no bar exists at/after 09:15 that day.
+    session_open = bisect.bisect_left(t, day_start + 9 * 3600 + 15 * 60)
+    open_idx = session_open if session_open < hi else lo
+    day_open = s["o"][open_idx]
     prev_close = s["c"][lo - 1] if lo > 0 else None    # last print of the prior day
     if time:
         target = int((pd.Timestamp(f"{date} {time}") - EPOCH) / ONE_SEC)
@@ -613,16 +730,31 @@ def search(q: str = Query(...), limit: int = 40):
     needle = m.group(1)
     want_type = m.group(2).upper() if m.group(2) else None
 
-    if USING_DB:
-        return _db_search(needle, want_type, limit)
-
-    out = []
+    # The DB only indexes the expiries it was ingested with, so a DB-only search silently
+    # hides instruments from any newer expiry folder. Ask the DB for what it knows, then scan
+    # the filesystem for JUST the expiries it doesn't (cheap — filenames only), and merge.
+    known = _db_expiry_set() if USING_DB else set()
+    # over-fetch from the DB so the merged re-sort below isn't biased by its own truncation
+    out = list(_db_search(needle, want_type, max(limit * 3, limit))) if USING_DB else []
     for strike, typ, exp in _instrument_index():
+        if exp in known:
+            continue
         if want_type and typ != want_type:
             continue
-        s = str(strike)
-        if s == needle or s.startswith(needle):
+        sk = str(strike)
+        if sk == needle or sk.startswith(needle):
             out.append({"strike": strike, "type": typ, "expiry": exp})
+
+    # de-dupe defensively (a rebuilt DB could overlap the filesystem scan)
+    seen = set()
+    deduped = []
+    for r in out:
+        key = (r.get("strike"), r.get("type"), r.get("expiry"))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(r)
+    out = deduped
 
     out.sort(key=lambda r: (r["strike"] != int(needle), r["strike"], r["expiry"]), reverse=False)
     # Stable-sort expiry newest-first within the same strike while keeping exact-first.

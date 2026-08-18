@@ -9,6 +9,8 @@
 // Detection runs entirely client-side on the same resampled candles the chart
 // draws, so markers always line up with what's on screen.
 
+import { pivotMarkers, PIVOT_PINE } from './pivots'
+
 // ----------------------------------------------------------- geometry helpers
 const body = (c) => Math.abs(c.close - c.open)
 const rng = (c) => c.high - c.low
@@ -172,12 +174,23 @@ export const PATTERNS = [
       const lo = Math.min(b.low, c.low, d.low)
       return bear(a) && body(a) >= 1.2 * avgBody(cs, i - 4) && bull(b) && bull(c) && bull(d) && hi <= a.high && lo >= a.low && bear(e) && e.close < a.close
     } },
+
+  // ===== market structure =====
+  // Not a candlestick pattern: a stateful pass over the whole series that marks
+  // SPH/SPL (small) + LPH/LPL (large) pivots. It supplies its own `detect` (see
+  // detectPattern) because it emits FOUR marker styles from one sequential scan,
+  // which the per-bar `test` interface can't express. `readOnlyCode` keeps the
+  // Pine viewer read-only — the script is a stateful v6 indicator that the inline
+  // Pine evaluator (single-bar expressions) cannot run.
+  { key: 'structure_pivots', name: 'SPH / SPL / LPH / LPL Pivots', type: 'Market Structure',
+    group: 'Market structure', dir: 'neutral', bars: 3, mark: 'PV', readOnlyCode: true,
+    detect: (cs) => pivotMarkers(cs, { win: 3 }) },
 ]
 
 export const PATTERN_BY_KEY = Object.fromEntries(PATTERNS.map((p) => [p.key, p]))
 
 // grouped for the dropdown, in registry order
-export const PATTERN_GROUPS = ['Single candle', 'Two candle', 'Three candle', 'Complex']
+export const PATTERN_GROUPS = ['Single candle', 'Two candle', 'Three candle', 'Complex', 'Market structure']
 export const PATTERN_CATALOG = PATTERN_GROUPS.map((group) => ({
   category: group,
   items: PATTERNS.filter((p) => p.group === group),
@@ -192,6 +205,16 @@ const STYLE = {
 
 // markers (lightweight-charts format) for one pattern over the candle array
 export function detectPattern(p, candles) {
+  // Escape hatch for entries that need the WHOLE series at once (stateful market
+  // structure) or emit several marker styles — they return markers directly and
+  // skip the per-bar `test` loop below.
+  if (typeof p.detect === 'function') {
+    try {
+      return p.detect(candles) || []
+    } catch {
+      return []
+    }
+  }
   const st = STYLE[p.dir] || STYLE.neutral
   const out = []
   const start = (p.bars || 1) - 1
@@ -221,6 +244,9 @@ export function buildMarkers(keys, candles) {
 // ----------------------------------------------------------- Pine Script
 // One compilable Pine v5 indicator per pattern, mirroring the detector above.
 export const PATTERN_PINE = {
+  // The authentic TradingView source for the market-structure pivots (read-only —
+  // it is a stateful v6 script, not a single-bar expression the evaluator can run).
+  structure_pivots: PIVOT_PINE,
   doji: `//@version=5
 indicator("Doji", overlay=true)
 rng = high - low

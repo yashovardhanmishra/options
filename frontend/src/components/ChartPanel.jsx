@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createChart, CrosshairMode } from 'lightweight-charts'
 import { format, parse } from 'date-fns'
-import { getChart, getSpot } from '../api'
+import { getChart, getBars } from '../api'
 import {
   resample,
   filterByRange,
@@ -9,8 +9,12 @@ import {
   secToDateStr,
   tfToSeconds,
   TIMEFRAMES,
+  NSE_SESSION,
+  MCX_ENERGY_SESSION,
 } from '../utils/resample'
 import { INDICATORS, defaultParams } from '../utils/indicators'
+import { loadIndicators, saveIndicators } from '../chart/chartIndicatorsStore'
+import { heikinAshi } from '../utils/heikinAshi'
 import { cssVar, chartThemeOptions, onThemeChange } from '../theme'
 import { detectPattern, PATTERN_BY_KEY, PATTERN_PINE } from '../utils/patterns'
 import { evalPine } from '../utils/pine'
@@ -18,6 +22,31 @@ import { INDICATOR_PINE } from '../utils/pinescript'
 import IndicatorMenu from './IndicatorMenu'
 import CodeModal from './CodeModal'
 import { ChartDrawingLayer } from './ChartDrawingLayer'
+
+// Instruments the spot chart's market dropdown can show. `session` drives intraday
+// bucketing (MCX energy runs 09:00–24:00 IST, not the 09:15–15:30 equity window);
+// `minTf` is the source data's own bar width — finer timeframes cannot exist.
+const MARKETS = [
+  {
+    id: 'nifty',
+    name: 'NIFTY',
+    kind: 'Spot',
+    blurb: 'Index · 1-min source',
+    session: NSE_SESSION,
+    minTfSec: 60,
+    decimals: 2,
+  },
+  {
+    id: 'naturalgas',
+    name: 'NATURALGAS',
+    kind: 'MCX',
+    blurb: 'Futures · 5-min source',
+    session: MCX_ENERGY_SESSION,
+    minTfSec: 300,
+    decimals: 1,
+  },
+]
+const marketById = (id) => MARKETS.find((m) => m.id === id) ?? MARKETS[0]
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const pad = (n) => String(n).padStart(2, '0')
@@ -71,6 +100,24 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
   const prevReplayOnRef = useRef(false)
 
   const [raw, setRaw] = useState([])
+  // Which INSTRUMENT the spot chart shows (NIFTY spot / MCX natural gas). Only meaningful
+  // in `spot` mode — an option-strike chart is always its own contract. Remembered across
+  // sessions like the chart-type preference.
+  const [marketId, setMarketId] = useState(() => {
+    try {
+      return marketById(localStorage.getItem('opt:spotMarket')).id
+    } catch {
+      return 'nifty'
+    }
+  })
+  const market = marketById(marketId)
+  useEffect(() => {
+    try {
+      localStorage.setItem('opt:spotMarket', marketId)
+    } catch {
+      /* storage unavailable — this session only */
+    }
+  }, [marketId])
   const [tf, setTf] = useState(spot ? '15m' : '1m')
   const [customTf, setCustomTf] = useState('') // value of the custom-minutes box
   const [from, setFrom] = useState('')
@@ -78,6 +125,16 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [tip, setTip] = useState(null)
+  // Chart TYPE: normal candles vs Heikin-Ashi (display transform only). Remembered
+  // across sessions/charts as a global preference, like the timeframe habit.
+  const [ha, setHa] = useState(() => {
+    try {
+      return localStorage.getItem('opt:chartType') === 'ha'
+    } catch {
+      return false
+    }
+  })
+  const haRef = useRef(ha) // paint() reads a ref so it never closes over a stale value
   const [indicators, setIndicators] = useState([]) // [{ uid, key, params }]
   const [editing, setEditing] = useState(null) // uid whose params are being edited
   const [patterns, setPatterns] = useState([]) // active pattern keys (markers on candles)
@@ -86,6 +143,8 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
   // Bumped whenever the drawing overlay must re-project: visible-range change (pan/zoom),
   // container resize, or a series repaint. Passed to <ChartDrawingLayer redrawTick>.
   const [drawTick, setDrawTick] = useState(0)
+  // The drawing toolbar is PORTALED into this docked column beside the plot (see below).
+  const [drawDock, setDrawDock] = useState(null)
 
   // ----- Bar replay (reveal bars one per second from a chosen date) -----
   const [replayOpen, setReplayOpen] = useState(false) // control bar visible
@@ -138,7 +197,10 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
       setCodeView({
         kind: 'pattern',
         key,
-        editable: true,
+        // Entries flagged readOnlyCode (the stateful market-structure pivots) ship a real
+        // multi-bar Pine v6 script the inline single-bar evaluator can't run — show it, but
+        // don't offer an Apply that could only fail.
+        editable: !p?.readOnlyCode,
         title: p?.name || key,
         subtitle: p?.type,
         code: patternCode[key] || PATTERN_PINE[key],
@@ -173,7 +235,9 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
     let cancelled = false
     setLoading(true)
     setError(null)
-    const req = spot ? getSpot() : getChart(selection.expiry, selection.strike, selection.type)
+    const req = spot
+      ? getBars(marketId)
+      : getChart(selection.expiry, selection.strike, selection.type)
     req
       .then((data) => {
         if (cancelled) return
@@ -190,7 +254,7 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
     return () => {
       cancelled = true
     }
-  }, [selection, spot])
+  }, [selection, spot, marketId])
 
   // data span (for date-picker bounds)
   const span = useMemo(() => {
@@ -198,13 +262,28 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
     return { min: raw[0].time, max: raw[raw.length - 1].time }
   }, [raw])
 
+  // Timeframes this instrument's source data can actually produce — a 5-min feed cannot
+  // make 1m/3m bars. Option strikes are 1-min, so their list is the full set as before.
+  const minTfSec = spot ? market.minTfSec : 60
+  const priceDp = spot ? market.decimals : 2
+  const timeframeChoices = useMemo(
+    () => TIMEFRAMES.filter((t) => tfToSeconds(t) >= minTfSec),
+    [minTfSec],
+  )
+  // Switching to a coarser feed while sitting on a finer bar would silently render the raw
+  // (unbucketed) series — snap up to the finest bar this instrument really has.
+  useEffect(() => {
+    if (tfToSeconds(tf) < minTfSec) setTf(timeframeChoices[0] ?? '5m')
+  }, [minTfSec, tf, timeframeChoices])
+
   // ----- filtered + resampled series (FULL — the complete view, pre-replay) -----
   const fullSeries = useMemo(() => {
     const fromSec = dateStrToSec(from)
     const toSec = dateStrToSec(to, true)
     const windowed = filterByRange(raw, fromSec, toSec)
-    return resample(windowed, tf)
-  }, [raw, tf, from, to])
+    // Option strikes are NSE contracts; the spot chart uses its instrument's own session.
+    return resample(windowed, tf, spot ? market.session : NSE_SESSION)
+  }, [raw, tf, from, to, spot, market])
   // Distinct trading days in the CURRENT resampled/filtered series (fullSeries) — the replay
   // start-day dropdown for a short-lived contract (an option), so every listed day is one that
   // actually has bars the replay can start on. (Deriving from `raw` could list a day that
@@ -254,10 +333,25 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
       ois.push({ time: c.time, value: spot ? c.volume : c.oi })
       map.set(c.time, c)
     }
-    candleRef.current.setData(candles)
+    // Heikin-Ashi is a DISPLAY transform: only the drawn candles change. Indicators,
+    // patterns and pivots keep reading the real OHLC (mapRef/seriesRef), so their values
+    // stay truthful and the OHLC readout below still reports the real bar.
+    candleRef.current.setData(haRef.current ? heikinAshi(candles) : candles)
     oiRef.current.setData(ois)
     mapRef.current = map
   }
+
+  // Toggling the chart type re-paints the candle series in place (no chart rebuild, so
+  // zoom/pan, drawings and indicators all stay put) and remembers the choice.
+  useEffect(() => {
+    haRef.current = ha
+    try {
+      localStorage.setItem('opt:chartType', ha ? 'ha' : 'candles')
+    } catch {
+      /* storage unavailable — applies for this session only */
+    }
+    paint()
+  }, [ha])
 
   // ----- create chart once (container is always mounted) -----
   useEffect(() => {
@@ -630,11 +724,52 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
     ts.setVisibleLogicalRange({ from: mid - half, to: mid + half })
   }
 
-  // Persistence scope for the drawing overlay: one key per instrument (guard nulls → 'spot').
+  // Persistence scope for the drawing overlay AND the applied indicators: one key per instrument
+  // (guard nulls → 'spot'). Same key the drawing store uses.
+  // NIFTY keeps the historical plain 'spot' key so existing saved drawings/indicators
+  // survive; any other instrument gets its own namespace.
   const instrumentKey =
     spot || !selection?.expiry || !selection?.strike || !selection?.type
-      ? 'spot'
+      ? marketId === 'nifty'
+        ? 'spot'
+        : `spot:${marketId}`
       : `${selection.expiry}_${selection.strike}${selection.type}`
+
+  // ── PERSIST applied indicators / patterns per instrument (localStorage) so they SURVIVE A REFRESH
+  // like the drawings do. loadedIndKeyRef gates SAVING until the CURRENT instrument's load has run,
+  // so the initial empty state (or a mid-switch stale list) can't flush over the saved set. The SAVE
+  // effect is defined BEFORE the LOAD effect on purpose: on the first commit it runs while the ref is
+  // still null → skips; then the load effect populates state and arms the ref. localStorage is sync,
+  // so no debounce is needed (indicator changes are infrequent).
+  const loadedIndKeyRef = useRef(null)
+  useEffect(() => {
+    if (loadedIndKeyRef.current !== instrumentKey) return
+    saveIndicators(instrumentKey, {
+      indicators: indicators.map(({ key, params, colors }) => ({ key, params, colors })),
+      patterns,
+      patternCode,
+    })
+  }, [indicators, patterns, patternCode, instrumentKey])
+  useEffect(() => {
+    loadedIndKeyRef.current = null
+    let cancelled = false
+    loadIndicators(instrumentKey).then((saved) => {
+      if (cancelled) return
+      // The persisted set has no uids — re-assign session uids (so restored indicators don't collide
+      // with newly-added ones) and drop any whose key no longer exists in the catalog.
+      const inds = (saved?.indicators ?? [])
+        .filter((x) => x && INDICATORS[x.key])
+        .map((x) => ({ uid: ++uidRef.current, key: x.key, params: x.params ?? defaultParams(x.key), colors: x.colors }))
+      setIndicators(inds)
+      setPatterns(Array.isArray(saved?.patterns) ? saved.patterns.filter((k) => typeof k === 'string') : [])
+      setPatternCode(saved?.patternCode && typeof saved.patternCode === 'object' ? saved.patternCode : {})
+      setEditing(null)
+      loadedIndKeyRef.current = instrumentKey // armed in the microtask → after StrictMode's double-invoke
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [instrumentKey])
 
   // Magnet snap: given a data-anchor (time, price), return the nearest OHLC of the on-chart bar
   // closest in time. Used by the drawing overlay when its Magnet toggle is on; no-op fallback
@@ -670,11 +805,22 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
       <div className="relative z-30 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-edge bg-panel px-4 py-2">
         <div className="text-sm font-semibold text-slate-100">
           {spot ? (
-            <>
-              <span className="text-base">NIFTY</span>{' '}
-              <span className="text-emerald-400">Spot</span>
-              <span className="ml-2 text-xs font-normal text-slate-500">Index · 1-min source</span>
-            </>
+            <span className="flex items-center gap-2">
+              <select
+                value={marketId}
+                onChange={(e) => setMarketId(e.target.value)}
+                title="Market"
+                aria-label="Market"
+                className="cursor-pointer rounded border border-edge bg-panel2 px-2 py-1 text-sm font-semibold text-slate-100 outline-none [color-scheme:dark] hover:bg-edge focus:border-sky-500"
+              >
+                {MARKETS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} · {m.kind}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs font-normal text-slate-500">{market.blurb}</span>
+            </span>
           ) : hasSelection ? (
             <>
               <span className="text-base">{selection.strike}</span>{' '}
@@ -694,7 +840,7 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
           <>
             {/* Timeframe toggle */}
             <div className="flex overflow-hidden rounded-md border border-edge">
-              {TIMEFRAMES.map((t) => (
+              {timeframeChoices.map((t) => (
                 <button
                   key={t}
                   onClick={() => setTf(t)}
@@ -725,6 +871,23 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
                   : 'border-edge bg-panel2 text-slate-300 placeholder:text-slate-500 focus:border-sky-600'
               }`}
             />
+
+            {/* Chart type: normal candles ⇄ Heikin-Ashi (display transform only) */}
+            <button
+              onClick={() => setHa((v) => !v)}
+              title={
+                ha
+                  ? 'Heikin-Ashi candles — click for normal candles'
+                  : 'Normal candles — click for Heikin-Ashi'
+              }
+              className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+                ha
+                  ? 'border-sky-600 bg-sky-600/20 text-sky-200'
+                  : 'border-edge bg-panel2 text-slate-300 hover:bg-edge hover:text-white'
+              }`}
+            >
+              HA
+            </button>
 
             <IndicatorMenu onAdd={addIndicator} onAddPattern={addPattern} onViewCode={viewCode} />
 
@@ -881,8 +1044,16 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
         </div>
       )}
 
-      {/* Chart area — container is ALWAYS mounted so the chart can be created up front */}
-      <div className="relative min-h-0 flex-1">
+      {/* Chart area — container is ALWAYS mounted so the chart can be created up front.
+          The drawing toolbar is DOCKED in its own column to the left instead of floating
+          over the candles, so it can never hide the first bars or the OHLC readout. */}
+      <div className="flex min-h-0 flex-1">
+        <div
+          ref={setDrawDock}
+          className="shrink-0 border-r border-edge bg-panel"
+          style={{ width: ready ? 44 : 0 }}
+        />
+        <div className="relative min-h-0 flex-1">
         <div ref={wrapRef} className="absolute inset-0" />
 
         {/* TradingView-style drawing/annotation overlay (SVG inset-0 over the chart + a
@@ -896,6 +1067,7 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
             redrawTick={drawTick}
             onZoom={(factor) => zoomBy(factor)}
             snapPrice={snapPrice}
+            toolbarSlot={drawDock}
           />
         )}
 
@@ -1070,12 +1242,15 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
           // CLOSE (C) is the price at the bucket's END, not at the label minute. Show the
           // full span (e.g. 09:45–09:50) so the readout can't be misread as a 09:45 print —
           // this is exactly why the 5m "09:45" close (135.65) differs from the option
-          // chain's 1-min 09:45 LTP (118.55). Clamp the end to the 15:30 session close so a
-          // folded last bar never labels past the session.
+          // chain's 1-min 09:45 LTP (118.55). Clamp the end to THIS instrument's session
+          // close so a folded last bar never labels past the session (15:30 for NSE, 24:00
+          // for MCX energy — a fixed 15:30 clamp made every natural-gas evening bar read
+          // '23:45–15:30').
           const stepSec = tfToSeconds(tf)
           let spanEndSec = null
           if (stepSec > 60 && stepSec < 86400) {
-            const sessionClose = Math.floor(c.time / 86400) * 86400 + 15 * 3600 + 30 * 60
+            const sess = spot ? market.session : NSE_SESSION
+            const sessionClose = Math.floor(c.time / 86400) * 86400 + sess.openSec + sess.lenSec
             spanEndSec = Math.min(c.time + stepSec, sessionClose)
           }
           return (
@@ -1087,10 +1262,10 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
                 )}
               </span>
               <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5">
-                <span className="text-slate-500">O <span className="text-slate-200">{c.open.toFixed(2)}</span></span>
-                <span className="text-slate-500">H <span className={green}>{c.high.toFixed(2)}</span></span>
-                <span className="text-slate-500">L <span className={red}>{c.low.toFixed(2)}</span></span>
-                <span className="text-slate-500">C <span className={c.close >= c.open ? green : red}>{c.close.toFixed(2)}</span></span>
+                <span className="text-slate-500">O <span className="text-slate-200">{c.open.toFixed(priceDp)}</span></span>
+                <span className="text-slate-500">H <span className={green}>{c.high.toFixed(priceDp)}</span></span>
+                <span className="text-slate-500">L <span className={red}>{c.low.toFixed(priceDp)}</span></span>
+                <span className="text-slate-500">C <span className={c.close >= c.open ? green : red}>{c.close.toFixed(priceDp)}</span></span>
                 <span className={chg >= 0 ? green : red}>
                   {sign(chg)}{chg.toFixed(2)} ({sign(chg)}{pct.toFixed(2)}%)
                 </span>
@@ -1110,6 +1285,7 @@ export default function ChartPanel({ selection, onClose, spot = false }) {
             </div>
           )
         })()}
+        </div>
       </div>
 
       {codeView && (

@@ -81,6 +81,59 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
     return { atmStrike: atm, maxOi: mx }
   }, [chain])
 
+  // ── Top-3 highlight: the 3 largest OI and the 3 largest Volume on EACH side ────────────
+  // Where the OI and the volume are piled up is the first thing anyone reads a chain for
+  // (support/resistance walls and where today's action actually is). Ranked, not just
+  // "the max", because the 2nd/3rd walls matter as much as the 1st. Ties break by the
+  // first-seen strike, and zero/blank cells are never ranked (a chain of empty strikes
+  // must not paint three arbitrary rows).
+  const topRank = useMemo(() => {
+    const out = { CE: { oi: new Map(), volume: new Map() }, PE: { oi: new Map(), volume: new Map() } }
+    for (const side of ['CE', 'PE']) {
+      for (const metric of ['oi', 'volume']) {
+        const vals = []
+        chain.forEach((r, i) => {
+          const v = side === 'CE' ? r.ce?.[metric] : r.pe?.[metric]
+          if (typeof v === 'number' && v > 0) vals.push([i, v])
+        })
+        vals.sort((a, b) => b[1] - a[1] || a[0] - b[0])
+        vals.slice(0, 3).forEach(([i], k) => out[side][metric].set(i, k + 1))
+      }
+    }
+    return out
+  }, [chain])
+
+  // Rank 1 is the strongest tint, 3 the faintest — a sequential ramp in the side's OWN hue
+  // (sky for calls, orange for puts), so the highlight never competes with the CE/PE identity
+  // colours already in the table. `title` states the rank in words: the tint is a cue, not the
+  // only carrier of the information.
+  // INLINE style, not a Tailwind bg-* class: the cell already carries a base
+  // `bg-sky-500/[0.04]` / `bg-orange-500/[0.04]`, and between two equal-specificity
+  // background utilities the CSS *file* order wins — NOT the order in the class
+  // attribute. Adding a second bg-* class therefore did nothing (verified: the ranked
+  // cell computed to the same rgba(14,165,233,0.04) as an unranked one). An inline
+  // style always beats a class rule, so the highlight is guaranteed to show on every theme.
+  const RANK_RGB = { CE: '56,189,248', PE: '251,146,60' } // sky-400 / orange-400
+  const RANK_ALPHA = [0.38, 0.24, 0.13] // rank 1 strongest -> 3 faintest (sequential ramp)
+  const rankStyle = (i, metric, side) => {
+    const r = topRank[side][metric].get(i)
+    if (!r) return undefined
+    const rgb = RANK_RGB[side]
+    return {
+      backgroundColor: `rgba(${rgb},${RANK_ALPHA[r - 1]})`,
+      // an inset outline gives a second, non-colour cue (and keeps rank 1 unmistakable
+      // on light themes, where a soft tint alone can wash out)
+      boxShadow: `inset 0 0 0 1px rgba(${rgb},${r === 1 ? 0.9 : 0.5})`,
+    }
+  }
+  const rankCls = (i, metric, side) => (topRank[side][metric].get(i) ? 'font-semibold' : '')
+  const rankTitle = (i, metric, side, base) => {
+    const r = topRank[side][metric].get(i)
+    const what = metric === 'oi' ? 'OI' : 'volume'
+    const who = side === 'CE' ? 'calls' : 'puts'
+    return r ? `#${r} highest ${what} (${who}) — ${base}` : base
+  }
+
   // ── Column multi-select (spreadsheet-style) — click / shift-click / ⌘-click / drag on an
   //    OI, Chg-OI or Vol cell to pick rows, Shift+↑/↓ to extend, Esc to clear. The floating
   //    footer sums the picked cells in FULL numbers (not compact K/M). Each metric+side is a
@@ -199,7 +252,10 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
 
   return (
     <div className="relative h-full">
-      <div className="h-full overflow-auto">
+      {/* chain-scroll: smooth one-finger horizontal panning on mobile (see index.css). The table
+          keeps its natural min-content width and scrolls INSIDE this box — the flex ancestors
+          carry min-w-0 so the box is capped at the viewport instead of blowing past it. */}
+      <div className="chain-scroll h-full overflow-auto">
         <table className="w-full border-collapse text-right font-mono text-xs tabular-nums">
           <thead>
             <tr>
@@ -245,6 +301,20 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
                 'cursor-pointer bg-sky-500/[0.04] px-2 py-1 transition-colors hover:bg-sky-500/20'
               const peCell =
                 'cursor-pointer bg-orange-500/[0.04] px-2 py-1 transition-colors hover:bg-orange-500/20'
+              // Rank-highlighted cells drop the base bg-* utility entirely. Two background
+              // utilities on one element are decided by CSS-file order, not class order, so the
+              // faint base tint was winning and the highlight never appeared. No bg class here =
+              // the inline rank colour is the only background rule in play.
+              const ceCellNoBg = 'cursor-pointer px-2 py-1 transition-colors'
+              const peCellNoBg = 'cursor-pointer px-2 py-1 transition-colors'
+              const cellFor = (i2, metric, side) =>
+                topRank[side][metric].get(i2)
+                  ? side === 'CE'
+                    ? ceCellNoBg
+                    : peCellNoBg
+                  : side === 'CE'
+                    ? ceCell
+                    : peCell
               const ceSelCls = ceSel ? 'bg-sky-500/25 ring-1 ring-inset ring-sky-400/60' : ''
               const peSelCls = peSel ? 'bg-orange-500/25 ring-1 ring-inset ring-orange-400/60' : ''
 
@@ -268,9 +338,10 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
                     <OiBar value={row.ce?.oi} max={maxOi} side="ce" />
                   </td>
                   <td
-                    className={`${ceCell} ${selCls(isSel(i, 'oi', 'CE'), 'CE')} select-none text-slate-300`}
+                    className={`${cellFor(i, 'oi', 'CE')} ${rankCls(i, 'oi', 'CE')} ${selCls(isSel(i, 'oi', 'CE'), 'CE')} select-none text-slate-300`}
+                    style={rankStyle(i, 'oi', 'CE')}
                     {...cellHandlers(i, 'oi', 'CE')}
-                    title={fmtFull(row.ce?.oi)}
+                    title={rankTitle(i, 'oi', 'CE', fmtFull(row.ce?.oi))}
                   >
                     {fmtOi(row.ce?.oi)}
                   </td>
@@ -282,9 +353,10 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
                     {fmtChg(row.ce?.chgOi)}
                   </td>
                   <td
-                    className={`${ceCell} ${selCls(isSel(i, 'volume', 'CE'), 'CE')} select-none text-slate-400`}
+                    className={`${cellFor(i, 'volume', 'CE')} ${rankCls(i, 'volume', 'CE')} ${selCls(isSel(i, 'volume', 'CE'), 'CE')} select-none text-slate-400`}
+                    style={rankStyle(i, 'volume', 'CE')}
                     {...cellHandlers(i, 'volume', 'CE')}
-                    title={fmtFull(row.ce?.volume)}
+                    title={rankTitle(i, 'volume', 'CE', fmtFull(row.ce?.volume))}
                   >
                     {fmtVol(row.ce?.volume)}
                   </td>
@@ -316,9 +388,10 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
                     {fmtLtp(row.pe?.ltp)}
                   </td>
                   <td
-                    className={`${peCell} ${selCls(isSel(i, 'volume', 'PE'), 'PE')} select-none text-left text-slate-400`}
+                    className={`${cellFor(i, 'volume', 'PE')} ${rankCls(i, 'volume', 'PE')} ${selCls(isSel(i, 'volume', 'PE'), 'PE')} select-none text-left text-slate-400`}
+                    style={rankStyle(i, 'volume', 'PE')}
                     {...cellHandlers(i, 'volume', 'PE')}
-                    title={fmtFull(row.pe?.volume)}
+                    title={rankTitle(i, 'volume', 'PE', fmtFull(row.pe?.volume))}
                   >
                     {fmtVol(row.pe?.volume)}
                   </td>
@@ -330,9 +403,10 @@ export default function OptionChain({ chain, onSelect, selected, loading, positi
                     {fmtChg(row.pe?.chgOi)}
                   </td>
                   <td
-                    className={`${peCell} ${selCls(isSel(i, 'oi', 'PE'), 'PE')} select-none text-left text-slate-300`}
+                    className={`${cellFor(i, 'oi', 'PE')} ${rankCls(i, 'oi', 'PE')} ${selCls(isSel(i, 'oi', 'PE'), 'PE')} select-none text-left text-slate-300`}
+                    style={rankStyle(i, 'oi', 'PE')}
                     {...cellHandlers(i, 'oi', 'PE')}
-                    title={fmtFull(row.pe?.oi)}
+                    title={rankTitle(i, 'oi', 'PE', fmtFull(row.pe?.oi))}
                   >
                     {fmtOi(row.pe?.oi)}
                   </td>

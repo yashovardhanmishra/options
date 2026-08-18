@@ -30,12 +30,16 @@ export default function ChainHeader({ chain, underlying, expiry }) {
   const stats = useMemo(() => {
     if (!chain || chain.length === 0) return null
     let callOi = 0, putOi = 0, callChg = 0, putChg = 0
+    // Track whether ANY strike carried a chgOi baseline: on an expiry's first trading day every
+    // chgOi is null, and rendering the untouched 0 as "(+0.0Cr)" presented "no data" as a
+    // measured zero change. null in → null out ("" via crChg).
+    let sawCallChg = false, sawPutChg = false
     let atm = null, best = Infinity
     for (const r of chain) {
       if (r.ce?.oi) callOi += r.ce.oi
       if (r.pe?.oi) putOi += r.pe.oi
-      if (r.ce?.chgOi) callChg += r.ce.chgOi
-      if (r.pe?.chgOi) putChg += r.pe.chgOi
+      if (r.ce?.chgOi != null) { callChg += r.ce.chgOi; sawCallChg = true }
+      if (r.pe?.chgOi != null) { putChg += r.pe.chgOi; sawPutChg = true }
       if (r.ce?.ltp != null && r.pe?.ltp != null) {
         const d = Math.abs(r.ce.ltp - r.pe.ltp)
         if (d < best) { best = d; atm = r }
@@ -43,7 +47,7 @@ export default function ChainHeader({ chain, underlying, expiry }) {
     }
     // Synthetic future from put-call parity: F ≈ K + (C - P) at the ATM strike.
     const synthFut = atm ? atm.strike + (atm.ce.ltp - atm.pe.ltp) : null
-    return { callOi, putOi, callChg, putChg, synthFut }
+    return { callOi, putOi, callChg: sawCallChg ? callChg : null, putChg: sawPutChg ? putChg : null, synthFut }
   }, [chain])
 
   if (!stats) return null
@@ -62,7 +66,7 @@ export default function ChainHeader({ chain, underlying, expiry }) {
         <span className="flex items-baseline gap-1">
           <span className="text-[10px] uppercase tracking-wide text-sky-400/80">Call OI</span>
           <span className="font-mono font-semibold tabular-nums text-sky-200">{cr(stats.callOi)}</span>
-          <span className={`text-[11px] ${cls(stats.callChg)}`}>({crChg(stats.callChg)})</span>
+          {stats.callChg != null && <span className={`text-[11px] ${cls(stats.callChg)}`}>({crChg(stats.callChg)})</span>}
         </span>
         <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
           Option Chain <span className="text-slate-500">({expLabel})</span>
@@ -70,7 +74,7 @@ export default function ChainHeader({ chain, underlying, expiry }) {
         <span className="flex items-baseline gap-1">
           <span className="text-[10px] uppercase tracking-wide text-orange-400/80">Put OI</span>
           <span className="font-mono font-semibold tabular-nums text-orange-200">{cr(stats.putOi)}</span>
-          <span className={`text-[11px] ${cls(stats.putChg)}`}>({crChg(stats.putChg)})</span>
+          {stats.putChg != null && <span className={`text-[11px] ${cls(stats.putChg)}`}>({crChg(stats.putChg)})</span>}
         </span>
       </div>
     </div>

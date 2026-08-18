@@ -35,7 +35,20 @@ rsync -avP ~/Desktop/data/2023 ~/Desktop/data/2024 ~/Desktop/data/2025 ~/Desktop
   root@YOUR_SERVER_IP:/opt/nifty-data/
 ```
 **From Windows:** use **WinSCP** (free, drag-and-drop) — drag the `2023`–`2026` folders into
-`/opt/nifty-data/`. (`nifty.csv` is not needed — the viewer never reads it.)
+`/opt/nifty-data/`.
+
+### Underlying price CSVs (optional — for the standalone chart + StratosAI)
+The option chain itself needs none of these, but the `?view=spot` chart and the StratosAI
+backtester read them over HTTP from this backend. Drop them next to the year folders:
+
+| Instrument | File in `/opt/nifty-data/` | Served at | Override env |
+| --- | --- | --- | --- |
+| NIFTY spot | `nifty.csv` | `/nifty-spot.csv`, `/api/bars?instrument=nifty` | `SPOT_CSV` |
+| MCX natural gas | `naturalgas_5min.csv` | `/naturalgas-5min.csv`, `/api/bars?instrument=naturalgas` | `NATGAS_CSV` |
+
+Both are plain OHLCV (`Datetime,Open,High,Low,Close,Volume[,OI]`). Check what the box has
+with `curl -s localhost:8000/api/instruments` — each entry reports `"available"`. A missing
+file just makes that one instrument 404; everything else keeps working.
 
 ## 4. Get the code and configure
 ```bash

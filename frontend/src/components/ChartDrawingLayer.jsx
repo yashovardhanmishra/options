@@ -95,14 +95,33 @@ export function ChartDrawingLayer({
   const snapAt = (time, price) => (magnet && snapPrice ? snapPrice(time, price) : price);
 
   // ── load saved drawings on open / instrument change ──
+  // loadedIdRef gates SAVING: until the load for the CURRENT instrument has resolved, the
+  // drawings state is the pre-load [] (or the previous instrument's list) — arming the debounce
+  // from it let a StrictMode remount / fast instrument switch flush saveDrawings(key, []) and
+  // permanently WIPE the instrument's saved drawings. It also seeds idSeq past the loaded ids
+  // (see below) so new drawings can't collide with persisted ones.
+  const loadedIdRef = useRef(null);
   useEffect(() => {
+    loadedIdRef.current = null;
     if (!instrumentKey) {
       setDrawings([]);
       return;
     }
     let cancelled = false;
     loadDrawings(instrumentKey).then((d) => {
-      if (!cancelled) setDrawings(Array.isArray(d) ? d : []);
+      if (cancelled) return;
+      const list = Array.isArray(d) ? d : [];
+      setDrawings(list);
+      // New-drawing ids come from a per-mount counter, but persisted drawings keep their
+      // original ids — without reseeding, the first new drawing of a type reuses a saved
+      // drawing's id, and every id-matched interaction (move/drag/delete) then hits BOTH.
+      let maxSeq = -1;
+      for (const dw of list) {
+        const m = /-(\d+)$/.exec(String(dw?.id ?? ""));
+        if (m) maxSeq = Math.max(maxSeq, Number(m[1]));
+      }
+      if (maxSeq >= idSeq.current) idSeq.current = maxSeq + 1;
+      loadedIdRef.current = instrumentKey;
     });
     return () => {
       cancelled = true;
@@ -110,14 +129,14 @@ export function ChartDrawingLayer({
   }, [instrumentKey]);
 
   // ── debounced save on change ──
-  // The pending-timer + latest snapshot live in refs so the unmount effect below can
+  // The pending-timer + latest snapshot live in refs so the flush effect below can
   // FLUSH a save the debounce cleanup would otherwise silently cancel (an edit made
   // <600ms before unmount was lost). The timer nulls its own ref on fire, so a
   // non-null ref always means "edits not yet persisted".
   const pendingSaveRef = useRef(null);
   const latestSaveRef = useRef(null);
   useEffect(() => {
-    if (!instrumentKey) return;
+    if (!instrumentKey || loadedIdRef.current !== instrumentKey) return;
     latestSaveRef.current = { id: instrumentKey, drawings };
     pendingSaveRef.current = setTimeout(() => {
       pendingSaveRef.current = null;
@@ -127,15 +146,18 @@ export function ChartDrawingLayer({
       if (pendingSaveRef.current != null) clearTimeout(pendingSaveRef.current);
     };
   }, [drawings, instrumentKey]);
+  // Flush on unmount AND on instrument change — a pending edit for the OLD instrument was
+  // otherwise cancelled (never persisted) when the user clicked another strike within 600ms.
   useEffect(
     () => () => {
       if (pendingSaveRef.current != null && latestSaveRef.current) {
         clearTimeout(pendingSaveRef.current);
         pendingSaveRef.current = null;
         void saveDrawings(latestSaveRef.current.id, latestSaveRef.current.drawings);
+        latestSaveRef.current = null;
       }
     },
-    [],
+    [instrumentKey],
   );
 
   // ── keep the SVG pixel size in sync (for full-width/height lines) ──
@@ -280,7 +302,17 @@ export function ChartDrawingLayer({
       const cur = gestureRef.current;
       if (cur?.kind === "draw" || cur?.kind === "brush") {
         const fin = draftRef.current;
-        if (fin) {
+        // Discard a click-without-drag draft: a two-point shape with identical anchors is
+        // invisible junk (for ruler, a permanently stuck 0×0 stat label) with no hit region —
+        // unselectable, undeletable except "Clear all", and it persists across reloads.
+        const degenerate =
+          fin &&
+          (cur.kind === "brush"
+            ? (fin.points?.length ?? 0) < 2
+            : fin.points?.length === 2 &&
+              fin.points[0].time === fin.points[1].time &&
+              fin.points[0].price === fin.points[1].price);
+        if (fin && !degenerate) {
           setDrawings((arr) => [...arr, fin]);
           setSelectedId(fin.id);
         }
@@ -544,7 +576,9 @@ export function ChartDrawingLayer({
     if (d.type === "ruler") {
       const dp = d.points[1].price - d.points[0].price;
       const pct = d.points[0].price !== 0 ? (dp / d.points[0].price) * 100 : 0;
-      const bars = positionBars(times, d.points[0].time, d.points[1].time);
+      // Anchors come from unproject (fractional logical → rounded time), so the raw span is
+      // fractional — rendered verbatim it read "6.883333333333334 bars".
+      const bars = Math.round(positionBars(times, d.points[0].time, d.points[1].time));
       const up = dp >= 0;
       const col = up ? "#00ffb3" : "#ff4060";
       const rx = Math.min(a.x, b.x);
@@ -685,11 +719,13 @@ export function ChartDrawingLayer({
         {/* live readout — %, R:R, duration */}
         <g style={{ pointerEvents: "none" }}>
           <rect x={lx} y={ly} width={labelW} height={52} rx={4} fill="rgba(3,5,11,0.82)" stroke="rgba(255,255,255,0.12)" />
+          {/* Signed formatting: handles drag freely across entry, so rewardPct/riskPct can go
+              negative — the hardcoded +/- prefixes rendered "+-2.0%" / "--1.0%" there. */}
           <text x={lx + 6} y={ly + 14} fontSize={10} fontFamily="JetBrains Mono, monospace" fill={`rgba(${G},1)`}>
-            {`${d.type.toUpperCase()}  +${stats.rewardPct.toFixed(1)}%`}
+            {`${d.type.toUpperCase()}  ${stats.rewardPct >= 0 ? "+" : ""}${stats.rewardPct.toFixed(1)}%`}
           </text>
           <text x={lx + 6} y={ly + 26} fontSize={10} fontFamily="JetBrains Mono, monospace" fill={`rgba(${R},1)`}>
-            {`stop  -${stats.riskPct.toFixed(1)}%`}
+            {`stop  ${-stats.riskPct >= 0 ? "+" : ""}${(-stats.riskPct).toFixed(1)}%`}
           </text>
           <text x={lx + 6} y={ly + 38} fontSize={10} fontFamily="JetBrains Mono, monospace" fill="#eef2ff">
             {`R:R  ${stats.rr != null ? stats.rr.toFixed(2) : "—"} : 1`}
@@ -900,7 +936,15 @@ export function ChartDrawingLayer({
   return (
     <>
       {toolbarSlot ? (
-        createPortal(horizontalToolbar, toolbarSlot)
+        // DOCKED: the host gives us a column to the LEFT of the plot, so the toolbar no longer
+        // floats over the candles (it used to cover the first bars + the OHLC readout's "O",
+        // badly on tablets where the plot is narrow). Vertical strip, same buttons.
+        createPortal(
+          <div className="flex h-full w-full flex-col items-center gap-1 overflow-y-auto py-1">
+            {toolbarInner}
+          </div>,
+          toolbarSlot,
+        )
       ) : compact ? (
         // >2 charts: a single trigger button opens the toolbar as a dropdown so the vertical
         // strip doesn't crowd/overlap a small chart. Picking a tool closes it (see toolBtn).

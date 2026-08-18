@@ -66,33 +66,44 @@ export const getChart = (expiry, strike, type) => {
 export const getUnderlying = (date, time) =>
   api.get('/api/underlying', { params: { date, time: time || undefined } }).then((r) => r.data)
 
-// Nifty index (spot): columnar {t,o,h,l,c,v} -> candle rows (oi unused for spot).
-// This is ~370k static bars (~21 MB). It was re-downloaded AND re-parsed on every spot-chart open;
-// now it's fetched + built ONCE per session and reused (re-opens are instant). Concurrent callers
-// share the single in-flight request.
-let _spotCache = null
-let _spotInflight = null
-export const getSpot = () => {
-  if (_spotCache) return Promise.resolve(_spotCache)
-  if (_spotInflight) return _spotInflight
-  _spotInflight = api
-    .get('/api/spot')
+// Underlying instrument bars (Nifty index spot, MCX natural gas, …): columnar
+// {t,o,h,l,c,v} -> candle rows (oi unused for these). Nifty is ~370k static bars (~21 MB)
+// and was re-downloaded AND re-parsed on every spot-chart open; each instrument is now
+// fetched + built ONCE per session and reused (re-opens are instant). Concurrent callers
+// of the SAME instrument share one in-flight request.
+const _barsCache = new Map()
+const _barsInflight = new Map()
+export const getBars = (instrument = 'nifty') => {
+  const hit = _barsCache.get(instrument)
+  if (hit) return Promise.resolve(hit)
+  const pending = _barsInflight.get(instrument)
+  if (pending) return pending
+  const p = api
+    .get('/api/bars', { params: { instrument } })
     .then((r) => {
       const d = r.data
       const out = new Array(d.t.length)
       for (let i = 0; i < d.t.length; i++) {
         out[i] = { time: d.t[i], open: d.o[i], high: d.h[i], low: d.l[i], close: d.c[i], volume: d.v[i], oi: 0 }
       }
-      _spotCache = out
-      _spotInflight = null
+      _barsCache.set(instrument, out)
+      _barsInflight.delete(instrument)
       return out
     })
     .catch((e) => {
-      _spotInflight = null
+      _barsInflight.delete(instrument)
       throw e
     })
-  return _spotInflight
+  _barsInflight.set(instrument, p)
+  return p
 }
+
+/** Nifty spot — the historical alias, unchanged for existing callers. */
+export const getSpot = () => getBars('nifty')
+
+/** Instruments the market dropdown can offer ({id,label,route,available}). */
+export const getInstruments = () =>
+  api.get('/api/instruments').then((r) => r.data)
 
 export const search = (q) =>
   api.get('/api/search', { params: { q } }).then((r) => r.data)

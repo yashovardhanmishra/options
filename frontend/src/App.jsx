@@ -28,7 +28,7 @@ export default function App() {
   // Per-view browser-tab title (the text shown when hovering the tab).
   useEffect(() => {
     document.title =
-      view === 'spot' ? 'Stratos Nifty Chart'
+      view === 'spot' ? 'Stratos Market Chart'
       : view === 'sim' ? 'Stratos Replay Sim'
       : 'Stratos Option Chain'
   }, [view])
@@ -56,8 +56,9 @@ export default function App() {
   return <Viewer userEmail={session?.user?.email} />
 }
 
-// Full-page Nifty index chart (own browser tab): all indicators, patterns,
-// timeframes + custom resampling, driven by the spot data feed.
+// Full-page underlying chart (own browser tab): all indicators, patterns, timeframes +
+// custom resampling. The INSTRUMENT (Nifty spot / MCX natural gas) is picked from the
+// dropdown inside ChartPanel, so the page chrome stays instrument-neutral.
 function SpotPage({ userEmail }) {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-ink text-slate-200">
@@ -66,7 +67,7 @@ function SpotPage({ userEmail }) {
           <span className="brand-mark h-[22px] w-[39px] shrink-0" aria-hidden />
           <div className="h-5 w-1.5 rounded-full bg-gradient-to-b from-emerald-400 to-sky-400" />
           <h1 className="text-sm font-bold tracking-wide text-slate-100">
-            NIFTY SPOT <span className="text-slate-500">— index chart</span>
+            MARKET <span className="text-slate-500">— underlying chart</span>
           </h1>
         </div>
         <a href={window.location.pathname} className="text-xs text-sky-400 hover:underline">
@@ -107,8 +108,28 @@ function Viewer({ userEmail }) {
   const [chain, setChain] = useState([])
   const [underlying, setUnderlying] = useState(null) // {spot, dayOpen, prevClose}
   const [chainLoading, setChainLoading] = useState(false)
-  const [selection, setSelection] = useState(null) // { expiry, strike, type }
+  // Restore the last-opened strike so a REFRESH reopens its chart — and therefore its saved
+  // drawings (persisted per-instrument in localStorage by ChartDrawingLayer). Cleared when the
+  // user closes the chart (closeChart → setSelection(null)), so an intentional close stays closed.
+  const [selection, setSelection] = useState(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('opt:lastSelection') || 'null')
+      return s && s.expiry && s.strike && s.type ? s : null
+    } catch {
+      return null
+    }
+  }) // { expiry, strike, type }
   const [chainOpen, setChainOpen] = useState(true) // left panel visible?
+
+  // Persist / clear the selection so it survives a refresh (see the initializer above).
+  useEffect(() => {
+    try {
+      if (selection) localStorage.setItem('opt:lastSelection', JSON.stringify(selection))
+      else localStorage.removeItem('opt:lastSelection')
+    } catch {
+      /* storage unavailable — selection just won't survive the session */
+    }
+  }, [selection])
 
   // expiries on mount
   useEffect(() => {
@@ -229,7 +250,7 @@ function Viewer({ userEmail }) {
         </div>
         <button
           onClick={() => window.open(window.location.pathname + '?view=spot', '_blank', 'noopener')}
-          title="Open the Nifty spot index chart in a new tab"
+          title="Open the underlying chart (Nifty spot / natural gas) in a new tab"
           className="flex items-center gap-1.5 rounded-md border border-edge bg-panel2 px-2.5 py-1 text-xs font-medium text-slate-300 hover:bg-edge hover:text-slate-100"
         >
           Nifty Spot
@@ -287,7 +308,12 @@ function Viewer({ userEmail }) {
       <main className="flex min-h-0 flex-1 flex-row">
         {/* LEFT — option chain */}
         {chainOpen && (
-          <section className="flex min-h-0 flex-1 flex-col border-r border-edge">
+          // min-w-0 is LOAD-BEARING: a flex-row child defaults to min-width:auto, so this section
+          // refused to shrink below the chain table's content width (~690px). On a phone it blew
+          // past the viewport, the root's overflow-hidden clipped the excess, and the inner
+          // overflow-auto had nothing left to scroll → the chain was "locked" with ~300px of
+          // columns unreachable. min-w-0 lets it shrink so the table scrolls horizontally instead.
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col border-r border-edge">
             {/* summary strip: day open / spot / synth fut + total call/put OI */}
             <ChainHeader chain={chain} underlying={underlying} expiry={expiry} />
             {/* chain controls */}
@@ -403,7 +429,10 @@ function Viewer({ userEmail }) {
 
         {/* RIGHT — chart */}
         {selection && (
-          <section className="flex min-h-0 flex-1 flex-col">
+          // min-w-0 for the same reason as the chain section above (flex-row children default to
+          // min-width:auto): without it the chart panel's toolbar content sets a floor width, so on
+          // a phone the two panes together overflow and get clipped instead of splitting the screen.
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col">
             <ChartPanel selection={selection} onClose={closeChart} />
           </section>
         )}
